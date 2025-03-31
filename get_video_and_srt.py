@@ -201,7 +201,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("url", help="YouTube URL")
     parser.add_argument(
-        "model",
+        "--model_size",
         help="Whisper model (tiny, base, small, medium, large, turbo)",
         default="turbo",
     )
@@ -210,4 +210,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    run_transcription(args.url, args.model, args.output_folder, log_callback=print_line)
+    run_transcription(
+        args.url, args.model_size, args.output_folder, log_callback=print_line
+    )

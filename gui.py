@@ -344,15 +344,15 @@ class ShadowingApp(QWidget):
         if url:
             self.url_input.clear()
 
-            model_name = self.model_selector.currentText()
+            model_size = self.model_selector.currentText()
             self.status_output.append(f"🔄 Processing: {url}")
-            self.status_output.append(f"🧠 Using Whisper model: {model_name}")
+            self.status_output.append(f"🧠 Using Whisper model: {model_size}")
 
             def background_task():
                 try:
                     run_transcription(
                         url,
-                        model_name,
+                        model_size,
                         "youtube_videos",
                         log_callback=self.status_output.append,
                     )
