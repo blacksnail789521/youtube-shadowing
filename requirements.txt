@@ -1,0 +1,8 @@
+torch==2.3.0
+torchaudio==2.3.0
+openai-whisper
+ffmpeg
+yt-dlp
+numpy==1.26.4
+pyinstaller
+python-vlc
