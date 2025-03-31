@@ -5,16 +5,21 @@ import re
 import sys
 
 
-# Determine executable directory (works for frozen and unfrozen modes)
+# 📁 Determine where the executable and bundled files are located
 if getattr(sys, "frozen", False):
     exe_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
 else:
     exe_dir = os.path.dirname(__file__)
 
-# 👇 Add ffmpeg folder to PATH (for yt-dlp to find ffmpeg.exe)
+# 🎞️ Add ffmpeg and VLC DLLs to PATH (for yt-dlp and libvlc)
 os.environ["PATH"] = exe_dir + os.pathsep + os.environ.get("PATH", "")
 
-# 👇 Tell Whisper where to find bundled mel_filters.npz
+# 🔊 Set VLC plugin path (needed for audio/video playback)
+vlc_plugin_path = os.path.join(exe_dir, "plugins")
+if os.path.exists(vlc_plugin_path):
+    os.environ["VLC_PLUGIN_PATH"] = vlc_plugin_path
+
+# 🧠 Tell Whisper where to find bundled model assets (mel_filters.npz, etc.)
 os.environ["WHISPER_ASSETS_DIR"] = os.path.join(exe_dir, "whisper", "assets")
 
 
