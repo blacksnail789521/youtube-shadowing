@@ -28,6 +28,18 @@ import threading
 from get_video_and_srt import run_transcription
 
 
+class ClickableSlider(QSlider):
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            x = event.pos().x()
+            ratio = x / self.width()
+            new_val = self.minimum() + ratio * (self.maximum() - self.minimum())
+            self.setValue(int(new_val))
+            self.sliderMoved.emit(int(new_val))
+            self.sliderReleased.emit()
+        super().mousePressEvent(event)
+
+
 class ShadowingApp(QWidget):
     def eventFilter(self, obj, event):
         if event.type() == event.KeyPress:
@@ -122,7 +134,7 @@ class ShadowingApp(QWidget):
         self.repeat_sub_btn = QPushButton("🔁 Subtitle")
         self.next_sub_btn = QPushButton("⏭️ Subtitle")
 
-        self.slider = QSlider(Qt.Horizontal)
+        self.slider = ClickableSlider(Qt.Horizontal)
         self.slider.setTracking(True)
         self.slider.sliderMoved.connect(self.slider_moved)
         self.slider.sliderPressed.connect(self.slider_pressed)
@@ -131,8 +143,8 @@ class ShadowingApp(QWidget):
         self.slider_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self.speed_slider = QSlider(Qt.Horizontal)
-        self.speed_slider.setMinimum(5)
-        self.speed_slider.setMaximum(20)
+        self.speed_slider.setMinimum(5)  # 50%
+        self.speed_slider.setMaximum(12)  # 120%
         self.speed_slider.setValue(10)
         self.speed_slider.setTickInterval(1)
         self.speed_slider.setTickPosition(QSlider.TicksBelow)
@@ -277,7 +289,7 @@ class ShadowingApp(QWidget):
         )
         top_video_splitter.addWidget(top_row_splitter)
         top_video_splitter.addWidget(video_widget)
-        top_video_splitter.setSizes([300, 500])
+        top_video_splitter.setSizes([100, 1000])
 
         right_layout = QVBoxLayout()
         right_layout.addWidget(QLabel("🧾 Subtitle List:"))
@@ -462,7 +474,7 @@ class ShadowingApp(QWidget):
                 self.player.set_time(sub.start.ordinal)
 
         for i, sub in enumerate(self.subtitles):
-            if sub.start.ordinal <= current_ms <= sub.end.ordinal:
+            if sub.start.ordinal <= current_ms < sub.end.ordinal:
                 self.subtitle_index = i
                 self.subtitle_list.setCurrentRow(i)
                 self.subtitle_display.setText(sub.text.strip())
@@ -479,6 +491,7 @@ class ShadowingApp(QWidget):
         self.slider_label.setText(
             f"{self.format_time(value)} / {self.format_time(self.total_duration)}"
         )
+        self.player.set_time(value)  # Sync video in real-time
 
     def change_speed(self, value):
         rate = value / 10.0
