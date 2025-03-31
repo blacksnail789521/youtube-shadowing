@@ -39,13 +39,14 @@ def build_exe():
         sys.exit(1)
 
     # PyInstaller command
+    app_name = "shadowing"
     cmd = [
         "pyinstaller",
         "--noconfirm",
         "--onefile",
         "--windowed",
         "--name",
-        "shadowing",  # 👈 NEW NAME HERE
+        app_name,
         "gui.py",
         "--distpath",
         ".",  # Output here
@@ -71,11 +72,11 @@ def build_exe():
     # Clean up
     if os.path.exists("build"):
         shutil.rmtree("build")
-    if os.path.exists("gui.spec"):
-        os.remove("gui.spec")
+    if os.path.exists(f"{app_name}.spec"):
+        os.remove(f"{app_name}.spec")
 
     if result.returncode == 0:
-        print("✅ Build complete. Check the current directory for 'gui.exe'.")
+        print(f"✅ Build complete. Check the current directory for '{app_name}.exe'.")
     else:
         print("❌ Build failed. See errors above.")
 
