@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QSizePolicy,
     QMessageBox,
+    QComboBox,
 )
 from PyQt5.QtGui import QFont
 import threading
@@ -63,6 +64,8 @@ class ShadowingApp(QWidget):
             self.restoreGeometry(geometry)
         else:
             self.setGeometry(200, 200, 1200, 700)
+
+        self.manual_jump = False
 
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
@@ -168,15 +171,40 @@ class ShadowingApp(QWidget):
         speed_layout.addWidget(self.speed_label)
         speed_layout.addWidget(self.speed_slider)
 
+        self.model_selector = QComboBox()
+        self.model_selector.addItems(
+            ["tiny", "base", "small", "medium", "large", "turbo"]
+        )
+        self.model_selector.setCurrentText("turbo")
+        self.model_selector.setToolTip("Choose Whisper model to use")
+
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("Paste YouTube URL and press Enter")
         self.url_input.returnPressed.connect(self.process_youtube_url)
 
         status_widget = QWidget()
         status_layout = QVBoxLayout()
-        status_layout.addWidget(self.url_input)
+
+        # --- Whisper Model Row ---
+        model_row = QHBoxLayout()
+        model_label = QLabel("🧠 Whisper Model:")
+        model_label.setFixedWidth(120)
+        model_row.addWidget(model_label)
+        model_row.addWidget(self.model_selector)
+        status_layout.addLayout(model_row)
+
+        # --- YouTube URL Row ---
+        url_row = QHBoxLayout()
+        url_label = QLabel("🔗 YouTube URL:")
+        url_label.setFixedWidth(120)
+        url_row.addWidget(url_label)
+        url_row.addWidget(self.url_input)
+        status_layout.addLayout(url_row)
+
+        # --- Status Output ---
         status_layout.addWidget(QLabel("📄 Status:"))
         status_layout.addWidget(self.status_output)
+
         status_widget.setLayout(status_layout)
 
         projects_header_layout = QHBoxLayout()
@@ -315,10 +343,19 @@ class ShadowingApp(QWidget):
         url = self.url_input.text().strip()
         if url:
             self.url_input.clear()
+
+            model_name = self.model_selector.currentText()
             self.status_output.append(f"🔄 Processing: {url}")
+            self.status_output.append(f"🧠 Using Whisper model: {model_name}")
+
             def background_task():
                 try:
-                    run_transcription(url, "youtube_videos", log_callback=self.status_output.append)
+                    run_transcription(
+                        url,
+                        model_name,
+                        "youtube_videos",
+                        log_callback=self.status_output.append,
+                    )
                     self.status_output.append("✅ Done. Refreshing list...")
                     self.load_projects()
                 except Exception as e:
@@ -407,17 +444,23 @@ class ShadowingApp(QWidget):
         return f"{mins:02}:{secs:02}"
 
     def sync_with_video(self):
+        if self.manual_jump:
+            return  # ⛔ Don't sync while manual jump is active
+
         if not self.slider_was_pressed:
             current_ms = self.player.get_time()
             self.slider.setValue(current_ms)
             self.slider_label.setText(
                 f"{self.format_time(current_ms)} / {self.format_time(self.total_duration)}"
             )
+
         current_ms = self.player.get_time()
+
         if self.loop_current and 0 <= self.subtitle_index < len(self.subtitles):
             sub = self.subtitles[self.subtitle_index]
             if current_ms > sub.end.ordinal:
                 self.player.set_time(sub.start.ordinal)
+
         for i, sub in enumerate(self.subtitles):
             if sub.start.ordinal <= current_ms <= sub.end.ordinal:
                 self.subtitle_index = i
@@ -445,7 +488,19 @@ class ShadowingApp(QWidget):
     def jump_to_selected_subtitle(self, item):
         index = self.subtitle_list.currentRow()
         if 0 <= index < len(self.subtitles):
-            self.player.set_time(self.subtitles[index].start.ordinal)
+            sub = self.subtitles[index]
+            self.manual_jump = True
+
+            # ⏩ Jump to selected time
+            self.player.set_time(sub.start.ordinal)
+
+            # ✅ Update UI manually to match the jump
+            self.subtitle_index = index
+            self.subtitle_display.setText(sub.text.strip())
+            self.subtitle_list.setCurrentRow(index)
+
+            # ⏳ Delay the sync override longer to be safe
+            QTimer.singleShot(3000, lambda: setattr(self, "manual_jump", False))
 
     def seek_relative(self, offset_ms):
         current = self.player.get_time()

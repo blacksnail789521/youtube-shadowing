@@ -2,6 +2,8 @@
 
 Practice your English listening, speaking, and shadowing skills using real YouTube videos with subtitles — powered by Whisper AI and VLC. This tool runs Whisper locally, so there's no need to use the OpenAI API, making it completely free to use!
 
+If you don't want to install all the dependencies and just want a standalone application, simply download `shadowing.exe`. It's ready to use for Windows, but note that GPU support is not available.
+
 ---
 
 ## 🛠️ Features
@@ -98,7 +100,7 @@ The generated file will be located in the project directory, ready to use.
 
 ### Step 1: Launch the App
 
-After building the standalone executable, simply double-click the `gui.exe` file to launch the application.
+After building the standalone executable, simply double-click the `shadowing.exe` file to launch the application.
 
 Alternatively, if you want to leverage GPU support, you can run the app directly using Python:
 

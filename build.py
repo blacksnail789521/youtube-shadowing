@@ -44,15 +44,17 @@ def build_exe():
         "--noconfirm",
         "--onefile",
         "--windowed",
+        "--name",
+        "shadowing",  # 👈 NEW NAME HERE
         "gui.py",
         "--distpath",
-        ".",  # Output exe here
+        ".",  # Output here
         "--workpath",
         "build",
         "--additional-hooks-dir",
         HOOKS_DIR,
         "--add-binary",
-        f"{FFMPEG_PATH};.",  # Bundle ffmpeg.exe
+        f"{FFMPEG_PATH};.",
     ]
 
     # Add VLC DLLs
