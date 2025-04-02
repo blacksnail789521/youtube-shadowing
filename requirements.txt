@@ -6,3 +6,5 @@ yt-dlp
 numpy==1.26.4
 pyinstaller
 python-vlc
+sounddevice
+scipy

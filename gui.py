@@ -3,7 +3,7 @@ import sys
 import shutil
 import vlc
 import pysrt
-from PyQt5.QtCore import Qt, QTimer, QProcess, QSettings
+from PyQt5.QtCore import Qt, QTimer, QProcess, QSettings, pyqtSlot, QMetaObject, Q_ARG
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
@@ -26,6 +26,10 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont
 import threading
 from get_video_and_srt import run_transcription
+import sounddevice as sd
+from scipy.io.wavfile import write, read as read_wav
+import numpy as np
+import tempfile
 
 
 class ClickableSlider(QSlider):
@@ -65,6 +69,10 @@ class ShadowingApp(QWidget):
                 self.loop_toggle.setChecked(not self.loop_toggle.isChecked())
                 self.toggle_loop()
                 return True
+            elif event.key() == Qt.Key_R:
+                self.record_toggle.setChecked(not self.record_toggle.isChecked())
+                self.toggle_record()
+                return True
         return super().eventFilter(obj, event)
 
     def __init__(self):
@@ -88,6 +96,9 @@ class ShadowingApp(QWidget):
         self.is_playing = False
         self.total_duration = 0
 
+        # Set to track recorded subtitles by index.
+        self.recorded_subtitles = set()
+
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(300)
         self.poll_timer.timeout.connect(self.sync_with_video)
@@ -98,7 +109,7 @@ class ShadowingApp(QWidget):
             "👋 Welcome to English Shadowing Tool with YouTube Videos!"
         )
 
-        self.process = QProcess()
+        self.process = QProcess(self)
         self.process.setProgram(sys.executable)
         self.process.readyReadStandardOutput.connect(self.update_status_output)
         self.process.readyReadStandardError.connect(self.update_status_output)
@@ -121,6 +132,12 @@ class ShadowingApp(QWidget):
         self.subtitle_display.setFont(QFont("Arial", 16))
         self.subtitle_display.setAlignment(Qt.AlignCenter)
 
+        # New small status indicator for recording/playback.
+        self.record_status_label = QLabel("")
+        self.record_status_label.setFixedWidth(100)
+        self.record_status_label.setFont(QFont("Arial", 9))
+        self.record_status_label.setStyleSheet("padding-left: 5px;")
+
         self.subtitle_list = QListWidget()
         self.subtitle_list.setWordWrap(True)
         self.subtitle_list.itemClicked.connect(self.jump_to_selected_subtitle)
@@ -133,6 +150,15 @@ class ShadowingApp(QWidget):
         self.prev_sub_btn = QPushButton("⏮️ Subtitle")
         self.repeat_sub_btn = QPushButton("🔁 Subtitle")
         self.next_sub_btn = QPushButton("⏭️ Subtitle")
+        for btn in [
+            self.skip_back_btn,
+            self.play_pause_btn,
+            self.skip_forward_btn,
+            self.prev_sub_btn,
+            self.repeat_sub_btn,
+            self.next_sub_btn,
+        ]:
+            btn.setFixedWidth(375)
 
         self.slider = ClickableSlider(Qt.Horizontal)
         self.slider.setTracking(True)
@@ -143,8 +169,8 @@ class ShadowingApp(QWidget):
         self.slider_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self.speed_slider = QSlider(Qt.Horizontal)
-        self.speed_slider.setMinimum(5)  # 50%
-        self.speed_slider.setMaximum(12)  # 120%
+        self.speed_slider.setMinimum(5)
+        self.speed_slider.setMaximum(12)
         self.speed_slider.setValue(10)
         self.speed_slider.setTickInterval(1)
         self.speed_slider.setTickPosition(QSlider.TicksBelow)
@@ -154,6 +180,16 @@ class ShadowingApp(QWidget):
 
         self.slider_was_pressed = False
         self.loop_current = False
+
+        self.record_toggle = QPushButton("🎙️ Record OFF")
+        self.record_toggle.setFixedSize(100, 25)
+        self.record_toggle.setStyleSheet("font-size: 12px; padding: 2px;")
+        self.record_toggle.setCheckable(True)
+        self.record_toggle.clicked.connect(self.toggle_record)
+
+        self.recording = False
+        self.playing_recorded = False
+        self.just_finished_recording = False  # flag to prevent immediate re-trigger
 
         self.init_ui()
         self.load_projects()
@@ -168,7 +204,9 @@ class ShadowingApp(QWidget):
         control_layout.addWidget(control_hint)
 
         shadow_layout = QHBoxLayout()
-        shadow_hint = QLabel("A: ◀ Prev    S: 🔁 Repeat    D: ▶ Next    L: Toggle Loop")
+        shadow_hint = QLabel(
+            "A: ◀ Prev    S: 🔁 Repeat    D: ▶ Next    L: Toggle Loop    R: Toggle Record"
+        )
         shadow_hint.setStyleSheet("color: gray; padding-left: 10px;")
         shadow_layout.addWidget(self.prev_sub_btn)
         shadow_layout.addWidget(self.repeat_sub_btn)
@@ -196,47 +234,36 @@ class ShadowingApp(QWidget):
 
         status_widget = QWidget()
         status_layout = QVBoxLayout()
-
-        # --- Whisper Model Row ---
         model_row = QHBoxLayout()
         model_label = QLabel("🧠 Whisper Model:")
         model_label.setFixedWidth(120)
         model_row.addWidget(model_label)
         model_row.addWidget(self.model_selector)
         status_layout.addLayout(model_row)
-
-        # --- YouTube URL Row ---
         url_row = QHBoxLayout()
         url_label = QLabel("🔗 YouTube URL:")
         url_label.setFixedWidth(120)
         url_row.addWidget(url_label)
         url_row.addWidget(self.url_input)
         status_layout.addLayout(url_row)
-
-        # --- Status Output ---
         status_layout.addWidget(QLabel("📄 Status:"))
         status_layout.addWidget(self.status_output)
-
         status_widget.setLayout(status_layout)
 
         projects_header_layout = QHBoxLayout()
         projects_label = QLabel("📺 YouTube Videos:")
-
         refresh_button = QPushButton("🔄 Refresh")
         refresh_button.setFixedSize(100, 25)
         refresh_button.setToolTip("Refresh YouTube Video List")
         refresh_button.clicked.connect(self.load_projects)
-
         delete_button = QPushButton("🗑️ Delete")
         delete_button.setFixedSize(100, 25)
         delete_button.setToolTip("Delete Selected YouTube Video")
         delete_button.clicked.connect(self.delete_selected_project)
-
         projects_header_layout.addWidget(projects_label)
         projects_header_layout.addStretch()
         projects_header_layout.addWidget(refresh_button)
         projects_header_layout.addWidget(delete_button)
-
         project_widget = QWidget()
         project_layout = QVBoxLayout()
         project_layout.addLayout(projects_header_layout)
@@ -254,12 +281,12 @@ class ShadowingApp(QWidget):
         video_display_layout = QVBoxLayout()
         video_display_layout.addWidget(self.video_frame)
         video_display_layout.addLayout(slider_layout)
-
         subtitle_with_loop_layout = QHBoxLayout()
         subtitle_with_loop_layout.addWidget(self.loop_toggle)
+        subtitle_with_loop_layout.addWidget(self.record_toggle)
+        subtitle_with_loop_layout.addWidget(self.record_status_label)
         subtitle_with_loop_layout.addWidget(self.subtitle_display)
         video_display_layout.addLayout(subtitle_with_loop_layout)
-
         video_display_widget = QWidget()
         video_display_widget.setLayout(video_display_layout)
         video_display_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -268,7 +295,6 @@ class ShadowingApp(QWidget):
         controls_layout.addLayout(control_layout)
         controls_layout.addLayout(shadow_layout)
         controls_layout.addLayout(speed_layout)
-
         controls_widget = QWidget()
         controls_widget.setLayout(controls_layout)
         controls_widget.setFixedHeight(130)
@@ -280,7 +306,6 @@ class ShadowingApp(QWidget):
         )
         video_splitter.addWidget(video_display_widget)
         video_splitter.addWidget(controls_widget)
-
         video_widget = video_splitter
 
         top_video_splitter = QSplitter(Qt.Vertical)
@@ -317,6 +342,105 @@ class ShadowingApp(QWidget):
         self.repeat_sub_btn.clicked.connect(self.repeat_subtitle)
         self.next_sub_btn.clicked.connect(self.next_subtitle)
 
+    def toggle_record(self):
+        self.record_toggle.setText(
+            "🎙️ Record ON" if self.record_toggle.isChecked() else "🎙️ Record OFF"
+        )
+        self.record_toggle.setStyleSheet(
+            "font-size: 12px; padding: 2px; background-color: orange;"
+            if self.record_toggle.isChecked()
+            else "font-size: 12px; padding: 2px;"
+        )
+        # Force sync update so the bottom subtitle remains in sync.
+        self.sync_with_video()
+
+    def record_after_subtitle(self, subtitle):
+        self.recording = True
+        self.record_status_label.setText("🔴 Recording...")
+        # Pause video before recording.
+        if self.is_playing:
+            self.player.pause()
+            self.is_playing = False
+            self.play_pause_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        duration = (
+            (subtitle.end.ordinal - subtitle.start.ordinal) * 1.1 / 1000.0
+        ) + 2.0  # seconds
+        samplerate = 44100
+        self.temp_wav_file = tempfile.NamedTemporaryFile(
+            suffix=".wav", delete=False
+        ).name
+
+        def record_and_play():
+            try:
+                audio = sd.rec(
+                    int(duration * samplerate),
+                    samplerate=samplerate,
+                    channels=1,
+                    dtype="int16",
+                )
+                sd.wait()  # Wait until recording is finished.
+                write(self.temp_wav_file, samplerate, audio)
+                self.recording = False
+                self.playing_recorded = True
+                QMetaObject.invokeMethod(
+                    self,
+                    "play_recorded_audio_wrapper",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, self.temp_wav_file),
+                )
+            except Exception as e:
+                self.recording = False
+                self.record_status_label.setText("⚠️ Rec Failed")
+                self.status_output.append(f"❌ Recording error: {str(e)}")
+
+        threading.Thread(target=record_and_play).start()
+
+    @pyqtSlot(str)
+    def play_recorded_audio_wrapper(self, filepath):
+        self.record_status_label.setText("🔊 Playing...")
+        self.play_recorded_audio(filepath)
+
+    def play_recorded_audio(self, filepath):
+        try:
+            samplerate, data = read_wav(filepath)
+            # Increase volume by applying a gain factor.
+            gain = 10.0  # Adjust this value as needed.
+            data = np.clip(data * gain, -32768, 32767).astype(np.int16)
+            playback_duration = int((data.shape[0] / samplerate) * 1000)
+            sd.play(data, samplerate)
+            QTimer.singleShot(playback_duration, self.finish_playback)
+        except Exception as e:
+            self.status_output.append(f"❌ Playback error: {str(e)}")
+            self.finish_playback()
+
+    def finish_playback(self):
+        self.playing_recorded = False
+        self.just_finished_recording = True
+        QTimer.singleShot(1000, lambda: setattr(self, "just_finished_recording", False))
+        self.record_status_label.setText("")
+        # Mark the current subtitle as recorded.
+        self.recorded_subtitles.add(self.subtitle_index)
+        # Update subtitle display and list without advancing if loop is on.
+        if 0 <= self.subtitle_index < len(self.subtitles):
+            self.subtitle_display.setText(
+                self.subtitles[self.subtitle_index].text.strip()
+            )
+            self.subtitle_list.setCurrentRow(self.subtitle_index)
+            self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
+        # If record is on and loop is off, then advance to next subtitle.
+        if self.record_toggle.isChecked() and not self.loop_current:
+            if self.subtitle_index < len(self.subtitles) - 1:
+                self.subtitle_index += 1
+                self.subtitle_display.setText(
+                    self.subtitles[self.subtitle_index].text.strip()
+                )
+                self.subtitle_list.setCurrentRow(self.subtitle_index)
+                self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
+        if not self.is_playing:
+            self.player.play()
+            self.is_playing = True
+            self.play_pause_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+
     def delete_selected_project(self):
         selected_item = self.project_list.currentItem()
         if not selected_item:
@@ -324,22 +448,17 @@ class ShadowingApp(QWidget):
                 self, "No Selection", "Please select a YouTube video to delete."
             )
             return
-
         project_name = selected_item.text()
         project_path = os.path.join("youtube_videos", project_name)
-
-        # If this YouTube video is currently loaded, stop the video and release the file
         if self.project_folder == project_path:
             self.player.stop()
             self.player.set_media(None)
-
         confirm = QMessageBox.question(
             self,
             "Delete YouTube Video",
             f"Are you sure you want to permanently delete:\n\n{project_name}?",
             QMessageBox.Yes | QMessageBox.No,
         )
-
         if confirm == QMessageBox.Yes:
             try:
                 shutil.rmtree(project_path)
@@ -355,7 +474,6 @@ class ShadowingApp(QWidget):
         url = self.url_input.text().strip()
         if url:
             self.url_input.clear()
-
             model_size = self.model_selector.currentText()
             self.status_output.append(f"🔄 Processing: {url}")
             self.status_output.append(f"🧠 Using Whisper model: {model_size}")
@@ -433,6 +551,8 @@ class ShadowingApp(QWidget):
         elif sys.platform == "darwin":
             self.player.set_nsobject(int(self.video_frame.winId()))
         self.subtitles = pysrt.open(subtitle_path)
+        # Reset recorded subtitles when loading a new project.
+        self.recorded_subtitles = set()
         self.subtitle_list.clear()
         for sub in self.subtitles:
             item = QListWidgetItem(sub.text.strip())
@@ -457,28 +577,54 @@ class ShadowingApp(QWidget):
 
     def sync_with_video(self):
         if self.manual_jump:
-            return  # ⛔ Don't sync while manual jump is active
-
+            return
         if not self.slider_was_pressed:
             current_ms = self.player.get_time()
             self.slider.setValue(current_ms)
             self.slider_label.setText(
                 f"{self.format_time(current_ms)} / {self.format_time(self.total_duration)}"
             )
-
         current_ms = self.player.get_time()
-
-        if self.loop_current and 0 <= self.subtitle_index < len(self.subtitles):
-            sub = self.subtitles[self.subtitle_index]
-            if current_ms > sub.end.ordinal:
-                self.player.set_time(sub.start.ordinal)
-
+        # If record mode is on and current subtitle hasn't been recorded yet, check for recording trigger.
+        if (
+            self.record_toggle.isChecked()
+            and self.subtitle_index not in self.recorded_subtitles
+            and not self.recording
+            and not self.playing_recorded
+            and not self.just_finished_recording
+        ):
+            current_sub = self.subtitles[self.subtitle_index]
+            if current_ms >= current_sub.end.ordinal:
+                self.record_after_subtitle(current_sub)
+                return  # Prevent further updates during recording.
+        # Otherwise, update the active subtitle normally.
         for i, sub in enumerate(self.subtitles):
             if sub.start.ordinal <= current_ms < sub.end.ordinal:
-                self.subtitle_index = i
-                self.subtitle_list.setCurrentRow(i)
-                self.subtitle_display.setText(sub.text.strip())
+                # If record & loop are on, do not update to a different subtitle.
+                if self.record_toggle.isChecked() and self.loop_current:
+                    break
+                # If record is on and the current subtitle hasn't been recorded, do not update.
+                if (
+                    self.record_toggle.isChecked()
+                    and self.subtitle_index not in self.recorded_subtitles
+                ):
+                    break
+                if self.subtitle_index != i:
+                    self.subtitle_index = i
+                    self.subtitle_list.setCurrentRow(i)
+                    self.subtitle_display.setText(sub.text.strip())
                 break
+        else:
+            if (
+                self.record_toggle.isChecked()
+                and not self.recording
+                and not self.playing_recorded
+                and not self.just_finished_recording
+            ):
+                if 0 <= self.subtitle_index < len(self.subtitles):
+                    sub = self.subtitles[self.subtitle_index]
+                    if current_ms >= sub.end.ordinal:
+                        self.record_after_subtitle(sub)
 
     def slider_pressed(self):
         self.slider_was_pressed = True
@@ -491,7 +637,7 @@ class ShadowingApp(QWidget):
         self.slider_label.setText(
             f"{self.format_time(value)} / {self.format_time(self.total_duration)}"
         )
-        self.player.set_time(value)  # Sync video in real-time
+        self.player.set_time(value)
 
     def change_speed(self, value):
         rate = value / 10.0
@@ -503,16 +649,10 @@ class ShadowingApp(QWidget):
         if 0 <= index < len(self.subtitles):
             sub = self.subtitles[index]
             self.manual_jump = True
-
-            # ⏩ Jump to selected time
             self.player.set_time(sub.start.ordinal)
-
-            # ✅ Update UI manually to match the jump
             self.subtitle_index = index
             self.subtitle_display.setText(sub.text.strip())
             self.subtitle_list.setCurrentRow(index)
-
-            # ⏳ Delay the sync override longer to be safe
             QTimer.singleShot(3000, lambda: setattr(self, "manual_jump", False))
 
     def seek_relative(self, offset_ms):
@@ -522,16 +662,27 @@ class ShadowingApp(QWidget):
     def repeat_subtitle(self):
         if 0 <= self.subtitle_index < len(self.subtitles):
             self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
+            self.subtitle_display.setText(
+                self.subtitles[self.subtitle_index].text.strip()
+            )
 
     def prev_subtitle(self):
         if self.subtitle_index > 0:
             self.subtitle_index -= 1
             self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
+            self.subtitle_display.setText(
+                self.subtitles[self.subtitle_index].text.strip()
+            )
+            self.subtitle_list.setCurrentRow(self.subtitle_index)
 
     def next_subtitle(self):
         if self.subtitle_index < len(self.subtitles) - 1:
             self.subtitle_index += 1
             self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
+            self.subtitle_display.setText(
+                self.subtitles[self.subtitle_index].text.strip()
+            )
+            self.subtitle_list.setCurrentRow(self.subtitle_index)
 
     def toggle_loop(self):
         self.loop_current = not self.loop_current

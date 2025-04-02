@@ -17,6 +17,7 @@ If you don't want to install all the dependencies and just want a standalone app
 - 🔁 Loop individual subtitles to mimic pronunciation
 - ⏱ Playback speed control (slow down or speed up)
 - 🎹 Keyboard shortcuts for fast navigation
+- 🎙 Record your voice while shadowing for self-assessment
 
 ---
 
