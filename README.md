@@ -1,5 +1,7 @@
 # 🎧 English Shadowing Tool with YouTube Videos
 
+![Demo Video](demo.mp4)
+
 Practice your English listening, speaking, and shadowing skills using real YouTube videos with subtitles — powered by Whisper AI and VLC. This tool runs Whisper locally, so there's no need to use the OpenAI API, making it completely free to use!
 
 If you don't want to install all the dependencies and just want a standalone application, simply download `shadowing.exe` from the [Releases page](https://github.com/blacksnail789521/youtube-shadowing/releases). It's ready to use for Windows, but note that GPU support is not available.
