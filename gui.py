@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QComboBox,
 )
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 import threading
 from get_video_and_srt import run_transcription
 import sounddevice as sd
@@ -77,7 +77,8 @@ class ShadowingApp(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🎧 English Shadowing Tool with YouTube Videos")
+        self.setWindowTitle("English Shadowing Tool with YouTube Videos")
+        self.setWindowIcon(QIcon(os.path.join("tools", "icon.ico")))
         self.settings = QSettings("ShadowingApp", "WindowState")
         geometry = self.settings.value("geometry")
         if geometry:
@@ -131,8 +132,12 @@ class ShadowingApp(QWidget):
         self.subtitle_display.setFixedHeight(50)
         self.subtitle_display.setFont(QFont("Arial", 16))
         self.subtitle_display.setAlignment(Qt.AlignCenter)
+        # Let the subtitle display expand horizontally.
+        self.subtitle_display.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Preferred
+        )
 
-        # New small status indicator for recording/playback.
+        # Status indicator for recording/playback.
         self.record_status_label = QLabel("")
         self.record_status_label.setFixedWidth(100)
         self.record_status_label.setFont(QFont("Arial", 9))
@@ -158,7 +163,7 @@ class ShadowingApp(QWidget):
             self.repeat_sub_btn,
             self.next_sub_btn,
         ]:
-            btn.setFixedWidth(375)
+            btn.setFixedWidth(400)
 
         self.slider = ClickableSlider(Qt.Horizontal)
         self.slider.setTracking(True)
@@ -204,9 +209,7 @@ class ShadowingApp(QWidget):
         control_layout.addWidget(control_hint)
 
         shadow_layout = QHBoxLayout()
-        shadow_hint = QLabel(
-            "A: ◀ Prev    S: 🔁 Repeat    D: ▶ Next    L: Toggle Loop    R: Toggle Record"
-        )
+        shadow_hint = QLabel("A: ◀ Prev    S: 🔁 Repeat    D: ▶ Next")
         shadow_hint.setStyleSheet("color: gray; padding-left: 10px;")
         shadow_layout.addWidget(self.prev_sub_btn)
         shadow_layout.addWidget(self.repeat_sub_btn)
@@ -281,12 +284,63 @@ class ShadowingApp(QWidget):
         video_display_layout = QVBoxLayout()
         video_display_layout.addWidget(self.video_frame)
         video_display_layout.addLayout(slider_layout)
+
+        # --- Bottom controls layout ---
+        # Create a horizontal layout for the left compact controls.
+        left_controls_layout = QHBoxLayout()
+        left_controls_layout.setSpacing(5)
+        # Loop toggle composite.
+        loop_widget = QWidget()
+        loop_layout = QVBoxLayout(loop_widget)
+        loop_layout.setContentsMargins(0, 0, 0, 0)
+        loop_layout.setSpacing(0)
+        loop_layout.addWidget(self.loop_toggle, alignment=Qt.AlignCenter)
+        loop_label = QLabel("L Toggle Loop")
+        loop_label.setAlignment(Qt.AlignCenter)
+        loop_label.setStyleSheet("font-size: 10px; color: gray;")
+        loop_layout.addWidget(loop_label)
+        left_controls_layout.addWidget(loop_widget)
+
+        # Record toggle composite.
+        record_widget = QWidget()
+        record_layout = QVBoxLayout(record_widget)
+        record_layout.setContentsMargins(0, 0, 0, 0)
+        record_layout.setSpacing(0)
+        record_layout.addWidget(self.record_toggle, alignment=Qt.AlignCenter)
+        record_label = QLabel("R: Toggle Record")
+        record_label.setAlignment(Qt.AlignCenter)
+        record_label.setStyleSheet("font-size: 10px; color: gray;")
+        record_layout.addWidget(record_label)
+        left_controls_layout.addWidget(record_widget)
+
+        # Gain label and dropdown.
+        gain_label = QLabel("Record Gain:")
+        gain_label.setStyleSheet("padding-left: 10px;")
+        gain_label.setFixedWidth(80)
+        left_controls_layout.addWidget(gain_label)
+        self.gain_selector = QComboBox()
+        gain_options = ["0.1", "0.25", "0.5"] + [str(i) for i in range(1, 21)]
+        self.gain_selector.addItems(gain_options)
+        self.gain_selector.setCurrentText("10")
+        self.gain_selector.setFixedWidth(60)
+        left_controls_layout.addWidget(self.gain_selector)
+
+        # Recording indicator.
+        left_controls_layout.addWidget(self.record_status_label)
+
+        # Wrap the left controls in a fixed-size widget.
+        left_controls_widget = QWidget()
+        left_controls_widget.setLayout(left_controls_layout)
+        left_controls_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        # Main bottom layout: add left controls then add the subtitle display with a stretch factor.
         subtitle_with_loop_layout = QHBoxLayout()
-        subtitle_with_loop_layout.addWidget(self.loop_toggle)
-        subtitle_with_loop_layout.addWidget(self.record_toggle)
-        subtitle_with_loop_layout.addWidget(self.record_status_label)
-        subtitle_with_loop_layout.addWidget(self.subtitle_display)
+        subtitle_with_loop_layout.addWidget(left_controls_widget)
+        subtitle_with_loop_layout.addWidget(self.subtitle_display, 1)
+        # --- End bottom controls layout ---
+
         video_display_layout.addLayout(subtitle_with_loop_layout)
+
         video_display_widget = QWidget()
         video_display_widget.setLayout(video_display_layout)
         video_display_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -403,8 +457,12 @@ class ShadowingApp(QWidget):
     def play_recorded_audio(self, filepath):
         try:
             samplerate, data = read_wav(filepath)
-            # Increase volume by applying a gain factor.
-            gain = 10.0  # Adjust this value as needed.
+            # Get the gain factor from the dropdown. Defaults to 10 if conversion fails.
+            try:
+                gain = float(self.gain_selector.currentText())
+            except Exception:
+                gain = 10.0
+            # Increase volume by applying the selected gain factor.
             data = np.clip(data * gain, -32768, 32767).astype(np.int16)
             playback_duration = int((data.shape[0] / samplerate) * 1000)
             sd.play(data, samplerate)
@@ -578,53 +636,50 @@ class ShadowingApp(QWidget):
     def sync_with_video(self):
         if self.manual_jump:
             return
+
+        current_ms = self.player.get_time()
         if not self.slider_was_pressed:
-            current_ms = self.player.get_time()
             self.slider.setValue(current_ms)
             self.slider_label.setText(
                 f"{self.format_time(current_ms)} / {self.format_time(self.total_duration)}"
             )
-        current_ms = self.player.get_time()
-        # If record mode is on and current subtitle hasn't been recorded yet, check for recording trigger.
+
+        # If we have a current subtitle, check if we need to loop it.
+        if 0 <= self.subtitle_index < len(self.subtitles):
+            current_sub = self.subtitles[self.subtitle_index]
+            # If current time is past the end of the current subtitle
+            if current_ms >= current_sub.end.ordinal:
+                # If loop mode is on and we're not in recording mode, loop the current subtitle.
+                if self.loop_current and not self.record_toggle.isChecked():
+                    self.player.set_time(current_sub.start.ordinal)
+                    return
+
+        # If not looping, try to update to the subtitle that matches current time.
+        for i, sub in enumerate(self.subtitles):
+            if sub.start.ordinal <= current_ms < sub.end.ordinal:
+                # If recording is on and either loop mode is on or this subtitle hasn't been recorded, do not update.
+                if self.record_toggle.isChecked() and (
+                    self.loop_current
+                    or self.subtitle_index not in self.recorded_subtitles
+                ):
+                    return
+                # Otherwise, update the current subtitle.
+                self.subtitle_index = i
+                self.subtitle_list.setCurrentRow(i)
+                self.subtitle_display.setText(sub.text.strip())
+                return
+
+        # If no subtitle matches (e.g. before the first subtitle), handle recording if needed.
         if (
             self.record_toggle.isChecked()
-            and self.subtitle_index not in self.recorded_subtitles
             and not self.recording
             and not self.playing_recorded
             and not self.just_finished_recording
         ):
-            current_sub = self.subtitles[self.subtitle_index]
-            if current_ms >= current_sub.end.ordinal:
-                self.record_after_subtitle(current_sub)
-                return  # Prevent further updates during recording.
-        # Otherwise, update the active subtitle normally.
-        for i, sub in enumerate(self.subtitles):
-            if sub.start.ordinal <= current_ms < sub.end.ordinal:
-                # If record & loop are on, do not update to a different subtitle.
-                if self.record_toggle.isChecked() and self.loop_current:
-                    break
-                # If record is on and the current subtitle hasn't been recorded, do not update.
-                if (
-                    self.record_toggle.isChecked()
-                    and self.subtitle_index not in self.recorded_subtitles
-                ):
-                    break
-                if self.subtitle_index != i:
-                    self.subtitle_index = i
-                    self.subtitle_list.setCurrentRow(i)
-                    self.subtitle_display.setText(sub.text.strip())
-                break
-        else:
-            if (
-                self.record_toggle.isChecked()
-                and not self.recording
-                and not self.playing_recorded
-                and not self.just_finished_recording
-            ):
-                if 0 <= self.subtitle_index < len(self.subtitles):
-                    sub = self.subtitles[self.subtitle_index]
-                    if current_ms >= sub.end.ordinal:
-                        self.record_after_subtitle(sub)
+            if 0 <= self.subtitle_index < len(self.subtitles):
+                sub = self.subtitles[self.subtitle_index]
+                if current_ms >= sub.end.ordinal:
+                    self.record_after_subtitle(sub)
 
     def slider_pressed(self):
         self.slider_was_pressed = True

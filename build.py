@@ -42,11 +42,14 @@ def build_exe():
     app_name = "shadowing"
     cmd = [
         "pyinstaller",
+        "--clean",
         "--noconfirm",
         "--onefile",
         "--windowed",
         "--name",
         app_name,
+        "--icon",
+        os.path.join("tools", "icon.ico"),
         "gui.py",
         "--distpath",
         ".",  # Output here
