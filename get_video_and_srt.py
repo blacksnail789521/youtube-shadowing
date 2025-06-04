@@ -185,6 +185,9 @@ def run_transcription(youtube_url, model_size, output_folder, log_callback=print
 
     os.remove(audio_file)
     log("✅ Subtitles saved.")
+    # Save original YouTube URL for later playback.
+    with open(os.path.join(folder_path, "url.txt"), "w", encoding="utf-8") as f:
+        f.write(youtube_url)
     return folder_path
 
 

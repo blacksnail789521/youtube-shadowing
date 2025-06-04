@@ -1,9 +1,10 @@
 import os
 import sys
 import shutil
-import vlc
+import re
 import pysrt
-from PyQt5.QtCore import Qt, QTimer, QProcess, QSettings, pyqtSlot, QMetaObject, Q_ARG
+from PyQt5.QtCore import Qt, QTimer, QProcess, QSettings, pyqtSlot, QMetaObject, Q_ARG, QUrl
+from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
@@ -14,7 +15,6 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QSlider,
     QStyle,
-    QFrame,
     QSplitter,
     QListWidgetItem,
     QTextEdit,
@@ -42,6 +42,49 @@ class ClickableSlider(QSlider):
             self.sliderMoved.emit(int(new_val))
             self.sliderReleased.emit()
         super().mousePressEvent(event)
+
+
+class VideoPlayer(QWebEngineView):
+    """Minimal wrapper around QWebEngineView to control a YouTube iframe."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setZoomFactor(1.0)
+        html_path = os.path.join(os.path.dirname(__file__), "player.html")
+        self.load(QUrl.fromLocalFile(os.path.abspath(html_path)))
+        self.loadFinished.connect(self._on_loaded)
+        self._ready = False
+        self._pending_id = None
+
+    def _on_loaded(self, ok):
+        self._ready = True
+        if self._pending_id:
+            self.set_video(self._pending_id)
+            self._pending_id = None
+
+    def set_video(self, video_id):
+        if self._ready:
+            self.page().runJavaScript(f"loadVideo('{video_id}')")
+        else:
+            self._pending_id = video_id
+
+    def play(self):
+        self.page().runJavaScript("playVideo()")
+
+    def pause(self):
+        self.page().runJavaScript("pauseVideo()")
+
+    def set_time(self, ms):
+        self.page().runJavaScript(f"seekTo({ms/1000.0})")
+
+    def get_time(self, callback):
+        self.page().runJavaScript("getCurrentTime()", lambda t: callback(int(float(t)*1000)))
+
+    def get_length(self, callback):
+        self.page().runJavaScript("getDuration()", lambda d: callback(int(float(d)*1000)))
+
+    def set_rate(self, rate):
+        self.page().runJavaScript(f"setPlaybackRate({rate})")
 
 
 class ShadowingApp(QWidget):
@@ -88,8 +131,7 @@ class ShadowingApp(QWidget):
 
         self.manual_jump = False
 
-        self.instance = vlc.Instance()
-        self.player = self.instance.media_player_new()
+        self.player = VideoPlayer()
 
         self.subtitle_index = 0
         self.subtitles = []
@@ -117,8 +159,7 @@ class ShadowingApp(QWidget):
         self.process.finished.connect(self.on_process_finished)
 
         self.project_list = QListWidget()
-        self.video_frame = QFrame()
-        self.video_frame.setStyleSheet("background-color: black;")
+        self.video_frame = self.player
         self.video_frame.setMinimumHeight(400)
 
         self.loop_toggle = QPushButton("🔁 Loop OFF")
@@ -508,9 +549,7 @@ class ShadowingApp(QWidget):
             return
         project_name = selected_item.text()
         project_path = os.path.join("youtube_videos", project_name)
-        if self.project_folder == project_path:
-            self.player.stop()
-            self.player.set_media(None)
+
         confirm = QMessageBox.question(
             self,
             "Delete YouTube Video",
@@ -592,22 +631,20 @@ class ShadowingApp(QWidget):
     def load_project(self, item):
         project_title = item.text()
         self.project_folder = os.path.join("youtube_videos", project_title)
-        video_file = next(
-            (f for f in os.listdir(self.project_folder) if f.startswith("video")), None
-        )
         subtitle_path = os.path.join(self.project_folder, "subtitle.srt")
-        if not video_file:
-            self.subtitle_display.setText("⚠️ No video found")
+        url_path = os.path.join(self.project_folder, "url.txt")
+        if os.path.exists(url_path):
+            with open(url_path, "r", encoding="utf-8") as f:
+                url = f.read().strip()
+        else:
+            url = ""
+
+        video_id_match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11})", url)
+        video_id = video_id_match.group(1) if video_id_match else ""
+        if not video_id:
+            self.subtitle_display.setText("⚠️ Video URL not found")
             return
-        video_path = os.path.join(self.project_folder, video_file)
-        media = self.instance.media_new(video_path)
-        self.player.set_media(media)
-        if sys.platform.startswith("linux"):
-            self.player.set_xwindow(self.video_frame.winId())
-        elif sys.platform == "win32":
-            self.player.set_hwnd(self.video_frame.winId())
-        elif sys.platform == "darwin":
-            self.player.set_nsobject(int(self.video_frame.winId()))
+        self.player.set_video(video_id)
         self.subtitles = pysrt.open(subtitle_path)
         # Reset recorded subtitles when loading a new project.
         self.recorded_subtitles = set()
@@ -621,10 +658,13 @@ class ShadowingApp(QWidget):
         self.is_playing = True
         self.play_pause_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
         self.poll_timer.start()
-        QTimer.singleShot(1000, self.set_total_duration)
+        QTimer.singleShot(2000, self.set_total_duration)
 
     def set_total_duration(self):
-        self.total_duration = self.player.get_length()
+        self.player.get_length(self._update_total_duration)
+
+    def _update_total_duration(self, length):
+        self.total_duration = length
         self.slider.setMaximum(self.total_duration)
 
     def format_time(self, ms):
@@ -637,49 +677,43 @@ class ShadowingApp(QWidget):
         if self.manual_jump:
             return
 
-        current_ms = self.player.get_time()
-        if not self.slider_was_pressed:
-            self.slider.setValue(current_ms)
-            self.slider_label.setText(
-                f"{self.format_time(current_ms)} / {self.format_time(self.total_duration)}"
-            )
+        def handle_time(current_ms):
+            if not self.slider_was_pressed:
+                self.slider.setValue(current_ms)
+                self.slider_label.setText(
+                    f"{self.format_time(current_ms)} / {self.format_time(self.total_duration)}"
+                )
 
-        # If we have a current subtitle, check if we need to loop it.
-        if 0 <= self.subtitle_index < len(self.subtitles):
-            current_sub = self.subtitles[self.subtitle_index]
-            # If current time is past the end of the current subtitle
-            if current_ms >= current_sub.end.ordinal:
-                # If loop mode is on and we're not in recording mode, loop the current subtitle.
-                if self.loop_current and not self.record_toggle.isChecked():
-                    self.player.set_time(current_sub.start.ordinal)
-                    return
-
-        # If not looping, try to update to the subtitle that matches current time.
-        for i, sub in enumerate(self.subtitles):
-            if sub.start.ordinal <= current_ms < sub.end.ordinal:
-                # If recording is on and either loop mode is on or this subtitle hasn't been recorded, do not update.
-                if self.record_toggle.isChecked() and (
-                    self.loop_current
-                    or self.subtitle_index not in self.recorded_subtitles
-                ):
-                    return
-                # Otherwise, update the current subtitle.
-                self.subtitle_index = i
-                self.subtitle_list.setCurrentRow(i)
-                self.subtitle_display.setText(sub.text.strip())
-                return
-
-        # If no subtitle matches (e.g. before the first subtitle), handle recording if needed.
-        if (
-            self.record_toggle.isChecked()
-            and not self.recording
-            and not self.playing_recorded
-            and not self.just_finished_recording
-        ):
             if 0 <= self.subtitle_index < len(self.subtitles):
-                sub = self.subtitles[self.subtitle_index]
-                if current_ms >= sub.end.ordinal:
-                    self.record_after_subtitle(sub)
+                current_sub = self.subtitles[self.subtitle_index]
+                if current_ms >= current_sub.end.ordinal:
+                    if self.loop_current and not self.record_toggle.isChecked():
+                        self.player.set_time(current_sub.start.ordinal)
+                        return
+
+            for i, sub in enumerate(self.subtitles):
+                if sub.start.ordinal <= current_ms < sub.end.ordinal:
+                    if self.record_toggle.isChecked() and (
+                        self.loop_current or self.subtitle_index not in self.recorded_subtitles
+                    ):
+                        return
+                    self.subtitle_index = i
+                    self.subtitle_list.setCurrentRow(i)
+                    self.subtitle_display.setText(sub.text.strip())
+                    return
+
+            if (
+                self.record_toggle.isChecked()
+                and not self.recording
+                and not self.playing_recorded
+                and not self.just_finished_recording
+            ):
+                if 0 <= self.subtitle_index < len(self.subtitles):
+                    sub = self.subtitles[self.subtitle_index]
+                    if current_ms >= sub.end.ordinal:
+                        self.record_after_subtitle(sub)
+
+        self.player.get_time(handle_time)
 
     def slider_pressed(self):
         self.slider_was_pressed = True
@@ -711,8 +745,9 @@ class ShadowingApp(QWidget):
             QTimer.singleShot(3000, lambda: setattr(self, "manual_jump", False))
 
     def seek_relative(self, offset_ms):
-        current = self.player.get_time()
-        self.player.set_time(max(0, current + offset_ms))
+        def do_seek(current):
+            self.player.set_time(max(0, current + offset_ms))
+        self.player.get_time(do_seek)
 
     def repeat_subtitle(self):
         if 0 <= self.subtitle_index < len(self.subtitles):

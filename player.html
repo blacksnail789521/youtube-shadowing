@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>YouTube Player</title>
+<style>
+html, body, #player {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background-color: black;
+}
+</style>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+var player;
+var pendingId = null;
+function onYouTubeIframeAPIReady() {
+    player = new YT.Player('player', {
+        width: '100%',
+        height: '100%',
+        videoId: '',
+        playerVars: { 'playsinline': 1 }
+    });
+    if (pendingId) {
+        loadVideo(pendingId);
+        pendingId = null;
+    }
+}
+function loadVideo(id) {
+    if (player && player.loadVideoById) {
+        player.loadVideoById(id);
+    } else {
+        pendingId = id;
+    }
+}
+function playVideo() { if (player) player.playVideo(); }
+function pauseVideo() { if (player) player.pauseVideo(); }
+function seekTo(sec) { if (player) player.seekTo(sec, true); }
+function setPlaybackRate(rate) { if (player) player.setPlaybackRate(rate); }
+function getCurrentTime() { return player ? player.getCurrentTime() : 0; }
+function getDuration() { return player ? player.getDuration() : 0; }
+</script>
+</head>
+<body>
+<div id="player"></div>
+</body>
+</html>

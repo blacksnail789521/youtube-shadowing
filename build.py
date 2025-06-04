@@ -7,11 +7,6 @@ import sys
 HOOKS_DIR = "hooks"
 TOOLS_DIR = "tools"
 FFMPEG_PATH = os.path.join(TOOLS_DIR, "ffmpeg.exe")
-VLC_DLLS = [
-    os.path.join(TOOLS_DIR, "libvlc.dll"),
-    os.path.join(TOOLS_DIR, "libvlccore.dll"),
-]
-VLC_PLUGINS = os.path.join(TOOLS_DIR, "plugins")
 
 
 def build_exe():
@@ -27,16 +22,6 @@ def build_exe():
         )
         sys.exit(1)
 
-    # Check VLC DLLs
-    for dll in VLC_DLLS:
-        if not os.path.exists(dll):
-            print(f"❌ ERROR: Missing VLC file: {dll}")
-            sys.exit(1)
-
-    # Check VLC plugins folder
-    if not os.path.exists(VLC_PLUGINS):
-        print("❌ ERROR: VLC 'plugins' folder is missing in tools/")
-        sys.exit(1)
 
     # PyInstaller command
     app_name = "shadowing"
@@ -61,12 +46,6 @@ def build_exe():
         f"{FFMPEG_PATH};.",
     ]
 
-    # Add VLC DLLs
-    for dll in VLC_DLLS:
-        cmd.extend(["--add-binary", f"{dll};."])
-
-    # Add VLC plugins folder
-    cmd.extend(["--add-data", f"{VLC_PLUGINS};plugins"])
 
     # === Run Build ===
     print("🚀 Building standalone executable...")

@@ -3,7 +3,7 @@
 https://github.com/user-attachments/assets/9ad33f2a-5754-485c-98d6-6fedfd32f06e
 
 
-Practice your English listening, speaking, and shadowing skills using real YouTube videos with subtitles — powered by Whisper AI and VLC. This tool runs Whisper locally, so there's no need to use the OpenAI API, making it completely free to use!
+Practice your English listening, speaking, and shadowing skills using real YouTube videos with subtitles — powered by Whisper AI and an embedded YouTube player. This tool runs Whisper locally, so there's no need to use the OpenAI API, making it completely free to use!
 
 If you don't want to install all the dependencies and just want a standalone application, simply download `shadowing.exe` from the [Releases page](https://github.com/blacksnail789521/youtube-shadowing/releases). It's ready to use for Windows, but note that GPU support is not available.
 
@@ -41,18 +41,9 @@ Make sure you’re using Python 3.9+ and install dependencies:
 pip install -r requirements.txt
 ```
 
-### 3. Install VLC
+VLC is no longer required—the application uses an embedded YouTube player for video playback.
 
-Make sure VLC Media Player is installed on your system. You can download it from the [official VLC website](https://www.videolan.org/vlc/).
-
-- On Windows: Download and run the installer.
-- On macOS: Download the `.dmg` file and drag VLC to your Applications folder.
-- On Linux: Use your package manager, e.g., `sudo apt install vlc` on Ubuntu.
-
-VLC is required for video playback functionality.
-
-
-### 4. Install FFmpeg
+### 3. Install FFmpeg
 
 FFmpeg is required for processing audio and video files. Follow the steps below to install it:
 
@@ -80,7 +71,7 @@ ffmpeg -version
 
 If the command outputs the FFmpeg version, the installation was successful.
 
-### 5. (Optional) Run `build.py` for Standalone Build
+### 4. (Optional) Run `build.py` for Standalone Build
 
 If you prefer a simpler way to create a standalone executable, you can use the provided `build.py` script:
 
