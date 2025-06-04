@@ -96,6 +96,7 @@ class ShadowingApp(QWidget):
         self.project_folder = ""
         self.is_playing = False
         self.total_duration = 0
+        self.target_jump_ms = None
 
         # Set to track recorded subtitles by index.
         self.recorded_subtitles = set()
@@ -228,7 +229,7 @@ class ShadowingApp(QWidget):
         self.model_selector.addItems(
             ["tiny", "base", "small", "medium", "large", "turbo"]
         )
-        self.model_selector.setCurrentText("turbo")
+        self.model_selector.setCurrentText("base")
         self.model_selector.setToolTip("Choose Whisper model to use")
 
         self.url_input = QLineEdit()
@@ -634,9 +635,6 @@ class ShadowingApp(QWidget):
         return f"{mins:02}:{secs:02}"
 
     def sync_with_video(self):
-        if self.manual_jump:
-            return
-
         current_ms = self.player.get_time()
         if not self.slider_was_pressed:
             self.slider.setValue(current_ms)
@@ -644,32 +642,20 @@ class ShadowingApp(QWidget):
                 f"{self.format_time(current_ms)} / {self.format_time(self.total_duration)}"
             )
 
-        # If we have a current subtitle, check if we need to loop it.
-        if 0 <= self.subtitle_index < len(self.subtitles):
-            current_sub = self.subtitles[self.subtitle_index]
-            # If current time is past the end of the current subtitle
-            if current_ms >= current_sub.end.ordinal:
-                # If loop mode is on and we're not in recording mode, loop the current subtitle.
-                if self.loop_current and not self.record_toggle.isChecked():
-                    self.player.set_time(current_sub.start.ordinal)
-                    return
+        if self.manual_jump:
+            return
 
-        # If not looping, try to update to the subtitle that matches current time.
-        for i, sub in enumerate(self.subtitles):
-            if sub.start.ordinal <= current_ms < sub.end.ordinal:
-                # If recording is on and either loop mode is on or this subtitle hasn't been recorded, do not update.
-                if self.record_toggle.isChecked() and (
-                    self.loop_current
-                    or self.subtitle_index not in self.recorded_subtitles
-                ):
-                    return
-                # Otherwise, update the current subtitle.
-                self.subtitle_index = i
-                self.subtitle_list.setCurrentRow(i)
-                self.subtitle_display.setText(sub.text.strip())
-                return
+        # ---- 1. Handle Loop ----
+        if self.loop_current and not self.record_toggle.isChecked():
+            # If we have a valid subtitle
+            if 0 <= self.subtitle_index < len(self.subtitles):
+                sub = self.subtitles[self.subtitle_index]
+                # If we've passed the end of the current subtitle, rewind to its start
+                if current_ms >= sub.end.ordinal:
+                    self.player.set_time(sub.start.ordinal)
+                    return  # Avoid falling through to subtitle advancement
 
-        # If no subtitle matches (e.g. before the first subtitle), handle recording if needed.
+        # ---- 2. Handle Recording ----
         if (
             self.record_toggle.isChecked()
             and not self.recording
@@ -679,7 +665,19 @@ class ShadowingApp(QWidget):
             if 0 <= self.subtitle_index < len(self.subtitles):
                 sub = self.subtitles[self.subtitle_index]
                 if current_ms >= sub.end.ordinal:
+                    self.player.set_time(sub.end.ordinal)
                     self.record_after_subtitle(sub)
+                    return
+
+        # ---- 3. Advance subtitle_index if not in record mode ----
+        if not self.record_toggle.isChecked():
+            for i, sub in enumerate(self.subtitles):
+                if sub.start.ordinal <= current_ms < sub.end.ordinal:
+                    self.subtitle_index = i
+                    self.subtitle_list.setCurrentRow(i)
+                    self.subtitle_display.setText(sub.text.strip())
+                    return
+
 
     def slider_pressed(self):
         self.slider_was_pressed = True
@@ -699,16 +697,46 @@ class ShadowingApp(QWidget):
         self.player.set_rate(rate)
         self.speed_label.setText(f"Speed: {int(rate * 100)}%")
 
+    def wait_for_seek(self, target_ms, retries=10):
+        def check_seek():
+            cur = self.player.get_time()
+            if abs(cur - target_ms) < 500 or retries <= 0:  # allow 0.5s slack
+                self.manual_jump = False
+                self.target_jump_ms = None
+            else:
+                QTimer.singleShot(
+                    50, lambda: self.wait_for_seek(target_ms, retries - 1)
+                )
+
+        QTimer.singleShot(50, check_seek)
+
     def jump_to_selected_subtitle(self, item):
+        # Cancel previous jump
+        self.manual_jump = False
+        self.target_jump_ms = None
+        
         index = self.subtitle_list.currentRow()
         if 0 <= index < len(self.subtitles):
             sub = self.subtitles[index]
             self.manual_jump = True
-            self.player.set_time(sub.start.ordinal)
-            self.subtitle_index = index
-            self.subtitle_display.setText(sub.text.strip())
-            self.subtitle_list.setCurrentRow(index)
-            QTimer.singleShot(3000, lambda: setattr(self, "manual_jump", False))
+            self.target_jump_ms = sub.start.ordinal
+
+            state = self.player.get_state()
+            if state in [vlc.State.Ended, vlc.State.Stopped]:
+                self.player.stop()
+                self.player.play()
+                QTimer.singleShot(
+                    200, lambda: self._seek_and_update_subtitle(index, sub)
+                )
+            else:
+                self._seek_and_update_subtitle(index, sub)
+            self.wait_for_seek(sub.start.ordinal)
+
+    def _seek_and_update_subtitle(self, index, sub):
+        self.player.set_time(sub.start.ordinal)
+        self.subtitle_index = index
+        self.subtitle_display.setText(sub.text.strip())
+        self.subtitle_list.setCurrentRow(index)
 
     def seek_relative(self, offset_ms):
         current = self.player.get_time()
