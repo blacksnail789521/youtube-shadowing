@@ -43,17 +43,41 @@ AUDIO_FORMAT = "m4a"
 
 # === Real-time logger ===
 class StreamLogger:
-    def __init__(self, write_callback=None):
+    def __init__(self, write_callback=None, total_duration=0):
         self.write_callback = write_callback or (
             lambda x: sys.__stdout__.write(x + "\n")
         )
+        self.total_duration = total_duration
+
+    def _format_time(self, seconds: float) -> str:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        return f"{h:02}:{m:02}:{s:02}"
 
     def write(self, text):
-        if text.strip():
-            try:
-                self.write_callback(text.strip())
-            except Exception:
-                sys.__stdout__.write("❌ Logging failed.\n")
+        if not text.strip():
+            return
+        text = text.strip()
+        if self.total_duration and text.startswith("[") and "-->" in text:
+            match = re.search(r"-->\s*(\d+:\d+:\d+\.\d+)", text)
+            if match:
+                h, m, s = match.group(1).split(":")
+                end_sec = int(h) * 3600 + int(m) * 60 + float(s)
+                progress = min(end_sec, self.total_duration)
+                percent = progress / self.total_duration * 100
+                progress_msg = (
+                    f"⏳ {self._format_time(progress)} / {self._format_time(self.total_duration)} "
+                    f"({percent:.1f}%)"
+                )
+                try:
+                    self.write_callback(progress_msg)
+                except Exception:
+                    sys.__stdout__.write("❌ Logging failed.\n")
+        try:
+            self.write_callback(text)
+        except Exception:
+            sys.__stdout__.write("❌ Logging failed.\n")
 
     def flush(self):
         pass
@@ -66,10 +90,14 @@ def run_transcription(youtube_url, model_size, output_folder, log_callback=print
             log_callback(msg)
 
     # Step 1: Get video info & output path
-    info = yt_dlp.YoutubeDL({"quiet": True}).extract_info(youtube_url, download=False)
+    info = yt_dlp.YoutubeDL({"quiet": True}).extract_info(
+        youtube_url, download=False
+    )
     title_safe = re.sub(r"[\\/*?\"<>|:]", "_", info["title"])
     folder_path = os.path.join(output_folder, title_safe)
     os.makedirs(folder_path, exist_ok=True)
+    total_duration = info.get("duration") or 0
+    log("⏱️ Video length: " + StreamLogger()._format_time(total_duration))
 
     # Step 2: Download video
     video_path = os.path.join(folder_path, f"video.{VIDEO_FORMAT}")
@@ -124,7 +152,7 @@ def run_transcription(youtube_url, model_size, output_folder, log_callback=print
 
     log("📄 Transcribing audio (verbose=True)...")
     original_stdout = sys.stdout
-    sys.stdout = StreamLogger(log_callback)
+    sys.stdout = StreamLogger(log_callback, total_duration)
     try:
         result = model.transcribe(audio_file, word_timestamps=True, verbose=True)
     finally:
