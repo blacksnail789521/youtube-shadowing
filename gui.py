@@ -73,6 +73,23 @@ class ShadowingApp(QWidget):
                 self.record_toggle.setChecked(not self.record_toggle.isChecked())
                 self.toggle_record()
                 return True
+            elif event.key() == Qt.Key_P:
+                self.auto_play_toggle.setChecked(not self.auto_play_toggle.isChecked())
+                self.toggle_auto_play()
+                return True
+            elif event.key() == Qt.Key_Q:
+                # Decrease speed by one step (10%)
+                current = self.speed_slider.value()
+                if current > self.speed_slider.minimum():
+                    self.speed_slider.setValue(current - 1)
+                return True
+            elif event.key() == Qt.Key_E:
+                # Increase speed by one step (10%)
+                current = self.speed_slider.value()
+                if current < self.speed_slider.maximum():
+                    self.speed_slider.setValue(current + 1)
+                return True
+
         return super().eventFilter(obj, event)
 
     def __init__(self):
@@ -121,6 +138,15 @@ class ShadowingApp(QWidget):
         self.video_frame = QFrame()
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setMinimumHeight(400)
+
+        self.auto_play_toggle = QPushButton("🎵 Auto Play ON")
+        self.auto_play_toggle.setFixedSize(100, 25)
+        self.auto_play_toggle.setStyleSheet(
+            "font-size: 12px; padding: 2px; background-color: lightblue;"
+        )
+        self.auto_play_toggle.setCheckable(True)
+        self.auto_play_toggle.setChecked(True)  # Default enabled
+        self.auto_play_toggle.clicked.connect(self.toggle_auto_play)
 
         self.loop_toggle = QPushButton("🔁 Loop OFF")
         self.loop_toggle.setFixedSize(100, 25)
@@ -176,7 +202,7 @@ class ShadowingApp(QWidget):
 
         self.speed_slider = QSlider(Qt.Horizontal)
         self.speed_slider.setMinimum(5)
-        self.speed_slider.setMaximum(12)
+        self.speed_slider.setMaximum(15)
         self.speed_slider.setValue(10)
         self.speed_slider.setTickInterval(1)
         self.speed_slider.setTickPosition(QSlider.TicksBelow)
@@ -186,6 +212,8 @@ class ShadowingApp(QWidget):
 
         self.slider_was_pressed = False
         self.loop_current = False
+        self.auto_play_enabled = True
+        self.auto_play_paused_for_subtitle = False  # Reset pause flag for new project
 
         self.record_toggle = QPushButton("🎙️ Record OFF")
         self.record_toggle.setFixedSize(100, 25)
@@ -224,6 +252,11 @@ class ShadowingApp(QWidget):
         speed_layout = QHBoxLayout()
         speed_layout.addWidget(self.speed_label)
         speed_layout.addWidget(self.speed_slider)
+        speed_hint = QLabel("Q: 10% Slower    E: 10% Faster")
+        speed_hint.setStyleSheet("color: gray; padding-left: 10px;")
+        speed_layout.addWidget(speed_hint)
+        speed_layout.addStretch()  # Ensures items align left
+        self.speed_slider.setFixedWidth(1140)
 
         self.model_selector = QComboBox()
         self.model_selector.addItems(
@@ -290,6 +323,19 @@ class ShadowingApp(QWidget):
         # Create a horizontal layout for the left compact controls.
         left_controls_layout = QHBoxLayout()
         left_controls_layout.setSpacing(5)
+
+        # Auto play toggle composite.
+        auto_play_widget = QWidget()
+        auto_play_layout = QVBoxLayout(auto_play_widget)
+        auto_play_layout.setContentsMargins(0, 0, 0, 0)
+        auto_play_layout.setSpacing(0)
+        auto_play_layout.addWidget(self.auto_play_toggle, alignment=Qt.AlignCenter)
+        auto_play_label = QLabel("P: Toggle Auto Play")
+        auto_play_label.setAlignment(Qt.AlignCenter)
+        auto_play_label.setStyleSheet("font-size: 10px; color: gray;")
+        auto_play_layout.addWidget(auto_play_label)
+        left_controls_layout.addWidget(auto_play_widget)
+
         # Loop toggle composite.
         loop_widget = QWidget()
         loop_layout = QVBoxLayout(loop_widget)
@@ -397,6 +443,19 @@ class ShadowingApp(QWidget):
         self.repeat_sub_btn.clicked.connect(self.repeat_subtitle)
         self.next_sub_btn.clicked.connect(self.next_subtitle)
 
+    def toggle_auto_play(self):
+        self.auto_play_enabled = self.auto_play_toggle.isChecked()
+        self.auto_play_toggle.setText(
+            "🎵 Auto Play ON" if self.auto_play_enabled else "🎵 Auto Play OFF"
+        )
+        self.auto_play_toggle.setStyleSheet(
+            "font-size: 12px; padding: 2px; background-color: lightblue;"
+            if self.auto_play_enabled
+            else "font-size: 12px; padding: 2px;"
+        )
+        # Force sync update so the bottom subtitle remains in sync.
+        self.sync_with_video()
+
     def toggle_record(self):
         self.record_toggle.setText(
             "🎙️ Record ON" if self.record_toggle.isChecked() else "🎙️ Record OFF"
@@ -485,20 +544,57 @@ class ShadowingApp(QWidget):
                 self.subtitles[self.subtitle_index].text.strip()
             )
             self.subtitle_list.setCurrentRow(self.subtitle_index)
-            self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
-        # If record is on and loop is off, then advance to next subtitle.
-        if self.record_toggle.isChecked() and not self.loop_current:
-            if self.subtitle_index < len(self.subtitles) - 1:
-                self.subtitle_index += 1
-                self.subtitle_display.setText(
-                    self.subtitles[self.subtitle_index].text.strip()
-                )
-                self.subtitle_list.setCurrentRow(self.subtitle_index)
+            # Only set player time here if loop is on; for other cases we handle below
+            if self.loop_current:
                 self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
-        if not self.is_playing:
-            self.player.play()
-            self.is_playing = True
-            self.play_pause_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+
+        # Apply auto play logic after recording
+        if not self.auto_play_enabled:
+            if self.loop_current:
+                # Jump back to start of current subtitle and pause
+                if 0 <= self.subtitle_index < len(self.subtitles):
+                    self.player.set_time(
+                        self.subtitles[self.subtitle_index].start.ordinal
+                    )
+            else:
+                # Loop is off: jump to start of next subtitle (if exists)
+                next_idx = self.subtitle_index + 1
+                if next_idx < len(self.subtitles):
+                    self.subtitle_index = next_idx
+                    self.subtitle_display.setText(
+                        self.subtitles[self.subtitle_index].text.strip()
+                    )
+                    self.subtitle_list.setCurrentRow(self.subtitle_index)
+                    self.player.set_time(
+                        self.subtitles[self.subtitle_index].start.ordinal
+                    )
+            # Pause the video
+            if self.is_playing:
+                self.player.pause()
+                self.is_playing = False
+                self.play_pause_btn.setIcon(
+                    self.style().standardIcon(QStyle.SP_MediaPlay)
+                )
+            # Mark that we've paused for this subtitle
+            self.auto_play_paused_for_subtitle = True
+        else:
+            # If record is on and loop is off, then advance to next subtitle.
+            if self.record_toggle.isChecked() and not self.loop_current:
+                if self.subtitle_index < len(self.subtitles) - 1:
+                    self.subtitle_index += 1
+                    self.subtitle_display.setText(
+                        self.subtitles[self.subtitle_index].text.strip()
+                    )
+                    self.subtitle_list.setCurrentRow(self.subtitle_index)
+                    self.player.set_time(
+                        self.subtitles[self.subtitle_index].start.ordinal
+                    )
+            if not self.is_playing:
+                self.player.play()
+                self.is_playing = True
+                self.play_pause_btn.setIcon(
+                    self.style().standardIcon(QStyle.SP_MediaPause)
+                )
 
     def delete_selected_project(self):
         selected_item = self.project_list.currentItem()
@@ -569,6 +665,9 @@ class ShadowingApp(QWidget):
         else:
             self.player.play()
             self.play_pause_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            # Reset pause flag when manually starting playback
+            if not self.auto_play_enabled:
+                self.auto_play_paused_for_subtitle = False
         self.is_playing = not self.is_playing
 
     def load_projects(self):
@@ -612,6 +711,7 @@ class ShadowingApp(QWidget):
         self.subtitles = pysrt.open(subtitle_path)
         # Reset recorded subtitles when loading a new project.
         self.recorded_subtitles = set()
+        self.auto_play_paused_for_subtitle = False  # Reset pause flag for new project
         self.subtitle_list.clear()
         for sub in self.subtitles:
             item = QListWidgetItem(sub.text.strip())
@@ -645,7 +745,41 @@ class ShadowingApp(QWidget):
         if self.manual_jump:
             return
 
+        # ---- Auto Play Pause (check previous subtitle end) ----
+        if (
+            not self.auto_play_enabled
+            and not self.record_toggle.isChecked()
+            and 0 <= self.subtitle_index < len(self.subtitles)
+            and not self.auto_play_paused_for_subtitle
+        ):
+            prev_sub = self.subtitles[self.subtitle_index]
+            if current_ms >= prev_sub.end.ordinal:
+                # Pause
+                if self.is_playing:
+                    self.player.pause()
+                    self.is_playing = False
+                    self.play_pause_btn.setIcon(
+                        self.style().standardIcon(QStyle.SP_MediaPlay)
+                    )
+                # Jump logic
+                if self.loop_current:
+                    # Loop: jump back to start of same subtitle
+                    self.player.set_time(prev_sub.start.ordinal)
+                else:
+                    # Not looping: jump to next subtitle start if exists
+                    next_idx = self.subtitle_index + 1
+                    if next_idx < len(self.subtitles):
+                        self.player.set_time(self.subtitles[next_idx].start.ordinal)
+                        self.subtitle_index = next_idx
+                        self.subtitle_list.setCurrentRow(next_idx)
+                        self.subtitle_display.setText(
+                            self.subtitles[next_idx].text.strip()
+                        )
+                self.auto_play_paused_for_subtitle = True
+                return
+
         # ---- 1. Handle Loop ----
+        loop_jumped = False
         if self.loop_current and not self.record_toggle.isChecked():
             # If we have a valid subtitle
             if 0 <= self.subtitle_index < len(self.subtitles):
@@ -653,6 +787,13 @@ class ShadowingApp(QWidget):
                 # If we've passed the end of the current subtitle, rewind to its start
                 if current_ms >= sub.end.ordinal:
                     self.player.set_time(sub.start.ordinal)
+                    # If auto play is disabled, pause after jumping back
+                    if (
+                        not self.auto_play_enabled
+                        and not self.auto_play_paused_for_subtitle
+                    ):
+                        QTimer.singleShot(100, self.pause_after_loop_jump)
+                        self.auto_play_paused_for_subtitle = True
                     return  # Avoid falling through to subtitle advancement
 
         # ---- 2. Handle Recording ----
@@ -669,15 +810,21 @@ class ShadowingApp(QWidget):
                     self.record_after_subtitle(sub)
                     return
 
-        # ---- 3. Advance subtitle_index if not in record mode ----
+        # ---- 3. Advance subtitle_index and handle auto play logic ----
         if not self.record_toggle.isChecked():
+            subtitle_changed = False
             for i, sub in enumerate(self.subtitles):
                 if sub.start.ordinal <= current_ms < sub.end.ordinal:
+                    # Check if we moved to a new subtitle
+                    if self.subtitle_index != i:
+                        self.auto_play_paused_for_subtitle = False
                     self.subtitle_index = i
                     self.subtitle_list.setCurrentRow(i)
                     self.subtitle_display.setText(sub.text.strip())
-                    return
-
+                    break
+            else:
+                # We're not in any subtitle range - no additional auto play logic needed here
+                pass
 
     def slider_pressed(self):
         self.slider_was_pressed = True
@@ -714,12 +861,13 @@ class ShadowingApp(QWidget):
         # Cancel previous jump
         self.manual_jump = False
         self.target_jump_ms = None
-        
+
         index = self.subtitle_list.currentRow()
         if 0 <= index < len(self.subtitles):
             sub = self.subtitles[index]
             self.manual_jump = True
             self.target_jump_ms = sub.start.ordinal
+            self.auto_play_paused_for_subtitle = False  # Reset pause flag when jumping
 
             state = self.player.get_state()
             if state in [vlc.State.Ended, vlc.State.Stopped]:
@@ -744,6 +892,7 @@ class ShadowingApp(QWidget):
 
     def repeat_subtitle(self):
         if 0 <= self.subtitle_index < len(self.subtitles):
+            self.auto_play_paused_for_subtitle = False  # Reset pause flag
             self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
             self.subtitle_display.setText(
                 self.subtitles[self.subtitle_index].text.strip()
@@ -752,6 +901,7 @@ class ShadowingApp(QWidget):
     def prev_subtitle(self):
         if self.subtitle_index > 0:
             self.subtitle_index -= 1
+            self.auto_play_paused_for_subtitle = False  # Reset pause flag
             self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
             self.subtitle_display.setText(
                 self.subtitles[self.subtitle_index].text.strip()
@@ -761,6 +911,7 @@ class ShadowingApp(QWidget):
     def next_subtitle(self):
         if self.subtitle_index < len(self.subtitles) - 1:
             self.subtitle_index += 1
+            self.auto_play_paused_for_subtitle = False  # Reset pause flag
             self.player.set_time(self.subtitles[self.subtitle_index].start.ordinal)
             self.subtitle_display.setText(
                 self.subtitles[self.subtitle_index].text.strip()
@@ -775,6 +926,13 @@ class ShadowingApp(QWidget):
             if self.loop_current
             else "font-size: 12px; padding: 2px;"
         )
+
+    def pause_after_loop_jump(self):
+        """Pause the video after loop logic has jumped back to start of subtitle"""
+        if self.is_playing:
+            self.player.pause()
+            self.is_playing = False
+            self.play_pause_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
