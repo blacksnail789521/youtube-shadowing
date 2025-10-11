@@ -109,9 +109,9 @@ def run_transcription(youtube_url, model_size, output_folder, log_callback=print
     video_path = os.path.join(folder_path, f"video.{VIDEO_FORMAT}")
     log("📥 Downloading video...")
     ydl_opts = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
+        "format": "bv*+ba/best",  # more flexible
         "outtmpl": video_path,
-        "merge_output_format": VIDEO_FORMAT,
+        "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
