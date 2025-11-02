@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QComboBox,
 )
-from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 import threading
 from get_video_and_srt import run_transcription
 import sounddevice as sd
@@ -103,6 +103,7 @@ class ShadowingApp(QWidget):
         else:
             self.setGeometry(200, 200, 1200, 700)
 
+
         self.manual_jump = False
 
         self.instance = vlc.Instance()
@@ -138,6 +139,9 @@ class ShadowingApp(QWidget):
         self.video_frame = QFrame()
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setMinimumHeight(400)
+        
+        # Theme: apply dark mode
+        self.apply_theme()
 
         self.auto_play_toggle = QPushButton("🎵 Auto Play ON")
         self.auto_play_toggle.setFixedSize(100, 25)
@@ -936,6 +940,29 @@ class ShadowingApp(QWidget):
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
+
+    # -------------------
+     # THEME: Dark (always on)
+     # -------------------
+    def apply_theme(self):
+        """Apply dark mode palette globally (no toggle)."""
+        app = QApplication.instance()
+        app.setStyle("Fusion")
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor(30, 30, 30))
+        palette.setColor(QPalette.WindowText, Qt.white)
+        palette.setColor(QPalette.Base, QColor(25, 25, 25))
+        palette.setColor(QPalette.AlternateBase, QColor(45, 45, 45))
+        palette.setColor(QPalette.ToolTipBase, Qt.white)
+        palette.setColor(QPalette.ToolTipText, Qt.white)
+        palette.setColor(QPalette.Text, Qt.white)
+        palette.setColor(QPalette.Button, QColor(53, 53, 53))
+        palette.setColor(QPalette.ButtonText, Qt.white)
+        palette.setColor(QPalette.BrightText, Qt.red)
+        palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+        palette.setColor(QPalette.HighlightedText, Qt.white)
+        app.setPalette(palette)
+        self.video_frame.setStyleSheet("background-color: black;")
 
 
 if __name__ == "__main__":
