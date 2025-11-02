@@ -59,10 +59,11 @@ def build_exe():
         "--noconfirm",
         "--onedir",       # <-- changed from --onefile
         "--windowed",
+        "--noupx",        # <== prevents UPX compression, keeps icon intact
         "--name",
         app_name,
         "--icon",
-        os.path.join("tools", "icon.ico"),
+        os.path.abspath(os.path.join("tools", "icon.ico")),
         "gui.py",
         "--distpath",
         "dist",           # output folder is dist/
@@ -117,6 +118,16 @@ def build_exe():
         else:
             shutil.copytree(VLC_PLUGINS, dest_plugins)
             print(f"Copied plugins folder to {dest_plugins}")
+        
+        # Copy icon.ico into dist/<app> for reference
+        src_icon = os.path.join(TOOLS_DIR, "icon.ico")
+        dest_icon = os.path.join(app_dist_dir, "icon.ico")
+        if os.path.exists(src_icon):
+            shutil.copy2(src_icon, dest_icon)
+            print(f"Copied icon.ico to {dest_icon}")
+        else:
+            print("⚠️ Warning: icon.ico not found to copy.")
+            
     except Exception as e:
         print(f"⚠️ Warning: failed to copy extra tools into dist folder: {e}")
 

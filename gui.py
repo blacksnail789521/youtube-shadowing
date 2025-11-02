@@ -95,7 +95,21 @@ class ShadowingApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("English Shadowing Tool with YouTube Videos")
-        self.setWindowIcon(QIcon(os.path.join("tools", "icon.ico")))
+        
+        # Detect correct base path for both PyInstaller and dev mode
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS  # PyInstaller temp folder (onefile)
+        else:
+            base_path = os.path.dirname(__file__)
+
+        # Try both possible icon locations (tools/ for dev, dist/ for onedir)
+        icon_path = os.path.join(base_path, "tools", "icon.ico")
+        if not os.path.exists(icon_path):
+            # Fallback: icon.ico next to the exe (onedir build)
+            icon_path = os.path.join(os.path.dirname(sys.executable), "icon.ico")
+
+        self.setWindowIcon(QIcon(icon_path))
+
         self.settings = QSettings("ShadowingApp", "WindowState")
         geometry = self.settings.value("geometry")
         if geometry:
