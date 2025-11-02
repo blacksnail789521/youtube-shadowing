@@ -146,7 +146,7 @@ class ShadowingApp(QWidget):
         self.auto_play_toggle = QPushButton("🎵 Auto Play ON")
         self.auto_play_toggle.setFixedSize(100, 25)
         self.auto_play_toggle.setStyleSheet(
-            "font-size: 12px; padding: 2px; background-color: lightblue;"
+            "font-size: 12px; padding: 2px; background-color: #4682B4; color: white;"
         )
         self.auto_play_toggle.setCheckable(True)
         self.auto_play_toggle.setChecked(True)  # Default enabled
@@ -262,33 +262,51 @@ class ShadowingApp(QWidget):
         speed_layout.addStretch()  # Ensures items align left
         self.speed_slider.setFixedWidth(1140)
 
+        # === Left status panel ===
+        status_widget = QWidget()
+        status_layout = QVBoxLayout()
+
+        # --- Whisper Model row ---
         self.model_selector = QComboBox()
         self.model_selector.addItems(
             ["tiny", "base", "small", "medium", "large", "turbo"]
         )
         self.model_selector.setCurrentText("base")
         self.model_selector.setToolTip("Choose Whisper model to use")
-
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Paste YouTube URL and press Enter")
-        self.url_input.returnPressed.connect(self.process_youtube_url)
-
-        status_widget = QWidget()
-        status_layout = QVBoxLayout()
         model_row = QHBoxLayout()
         model_label = QLabel("🧠 Whisper Model:")
-        model_label.setFixedWidth(120)
+        model_label.setFixedWidth(140)
         model_row.addWidget(model_label)
         model_row.addWidget(self.model_selector)
         status_layout.addLayout(model_row)
+
+        # --- YouTube URL row ---
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("Paste YouTube URL and press Enter")
+        self.url_input.returnPressed.connect(self.process_youtube_url)
         url_row = QHBoxLayout()
         url_label = QLabel("🔗 YouTube URL:")
-        url_label.setFixedWidth(120)
+        url_label.setFixedWidth(140)
         url_row.addWidget(url_label)
         url_row.addWidget(self.url_input)
         status_layout.addLayout(url_row)
+
+        # --- Max Words per Subtitle row ---
+        self.max_words_selector = QComboBox()
+        self.max_words_selector.addItems([str(i) for i in range(10, 31)])  # 10 → 30
+        self.max_words_selector.setCurrentText("15")  # Default value
+        self.max_words_selector.setToolTip("Maximum number of words before a subtitle may split")
+        max_row = QHBoxLayout()
+        max_label = QLabel("🧾 Max Words per Subtitle:")
+        max_label.setFixedWidth(140)
+        max_row.addWidget(max_label)
+        max_row.addWidget(self.max_words_selector)
+        status_layout.addLayout(max_row)
+
+        # --- Status output area ---
         status_layout.addWidget(QLabel("📄 Status:"))
         status_layout.addWidget(self.status_output)
+
         status_widget.setLayout(status_layout)
 
         projects_header_layout = QHBoxLayout()
@@ -364,17 +382,48 @@ class ShadowingApp(QWidget):
         record_layout.addWidget(record_label)
         left_controls_layout.addWidget(record_widget)
 
-        # Gain label and dropdown.
+        # === Record Gain + Subtitle Font stacked vertically ===
+        gain_font_widget = QWidget()
+        gain_font_layout = QVBoxLayout(gain_font_widget)
+        gain_font_layout.setContentsMargins(0, 0, 0, 0)
+        gain_font_layout.setSpacing(2)
+
+        # Record Gain row
+        gain_row = QHBoxLayout()
         gain_label = QLabel("Record Gain:")
+        gain_label.setFixedWidth(90)
         gain_label.setStyleSheet("padding-left: 10px;")
-        gain_label.setFixedWidth(80)
-        left_controls_layout.addWidget(gain_label)
+        gain_row.addWidget(gain_label)
+
         self.gain_selector = QComboBox()
         gain_options = ["0.1", "0.25", "0.5"] + [str(i) for i in range(1, 21)]
         self.gain_selector.addItems(gain_options)
         self.gain_selector.setCurrentText("10")
         self.gain_selector.setFixedWidth(60)
-        left_controls_layout.addWidget(self.gain_selector)
+        gain_row.addWidget(self.gain_selector)
+        gain_row.addStretch()
+        gain_font_layout.addLayout(gain_row)
+
+        # Subtitle Font row
+        font_row = QHBoxLayout()
+        font_label = QLabel("Subtitle Font:")
+        font_label.setFixedWidth(90)
+        font_label.setStyleSheet("padding-left: 10px;")
+        font_row.addWidget(font_label)
+
+        self.subtitle_font_size_selector = QComboBox()
+        font_sizes = [str(i) for i in range(10, 25)]  # 10–24 pt
+        self.subtitle_font_size_selector.addItems(font_sizes)
+        self.subtitle_font_size_selector.setCurrentText("16")
+        self.subtitle_font_size_selector.setFixedWidth(60)
+        self.subtitle_font_size_selector.currentTextChanged.connect(self.change_subtitle_font_size)
+        font_row.addWidget(self.subtitle_font_size_selector)
+        font_row.addStretch()
+        gain_font_layout.addLayout(font_row)
+
+        # Add the combined widget to the left controls area
+        left_controls_layout.addWidget(gain_font_widget)
+
 
         # Recording indicator.
         left_controls_layout.addWidget(self.record_status_label)
@@ -453,7 +502,7 @@ class ShadowingApp(QWidget):
             "🎵 Auto Play ON" if self.auto_play_enabled else "🎵 Auto Play OFF"
         )
         self.auto_play_toggle.setStyleSheet(
-            "font-size: 12px; padding: 2px; background-color: lightblue;"
+            "font-size: 12px; padding: 2px; background-color: #4682B4; color: white;"
             if self.auto_play_enabled
             else "font-size: 12px; padding: 2px;"
         )
@@ -465,7 +514,7 @@ class ShadowingApp(QWidget):
             "🎙️ Record ON" if self.record_toggle.isChecked() else "🎙️ Record OFF"
         )
         self.record_toggle.setStyleSheet(
-            "font-size: 12px; padding: 2px; background-color: orange;"
+            "font-size: 12px; padding: 2px; background-color: #FF8C00; color: white;"
             if self.record_toggle.isChecked()
             else "font-size: 12px; padding: 2px;"
         )
@@ -610,8 +659,14 @@ class ShadowingApp(QWidget):
         project_name = selected_item.text()
         project_path = os.path.join("youtube_videos", project_name)
         if self.project_folder == project_path:
+            # Stop and clear current playback and subtitles
             self.player.stop()
             self.player.set_media(None)
+            self.subtitle_list.clear()
+            self.subtitle_display.setText("--")
+            self.project_folder = ""
+            self.subtitles = []
+            self.subtitle_index = 0
         confirm = QMessageBox.question(
             self,
             "Delete YouTube Video",
@@ -639,11 +694,13 @@ class ShadowingApp(QWidget):
 
             def background_task():
                 try:
+                    max_words = int(self.max_words_selector.currentText())
                     run_transcription(
                         url,
                         model_size,
                         "youtube_videos",
                         log_callback=self.status_output.append,
+                        max_words=max_words,
                     )
                     self.status_output.append("✅ Done. Refreshing list...")
                     self.load_projects()
@@ -848,6 +905,15 @@ class ShadowingApp(QWidget):
         self.player.set_rate(rate)
         self.speed_label.setText(f"Speed: {int(rate * 100)}%")
 
+    def change_subtitle_font_size(self, size_str):
+        try:
+            size = int(size_str)
+            current_font = self.subtitle_display.font()
+            current_font.setPointSize(size)
+            self.subtitle_display.setFont(current_font)
+        except ValueError:
+            pass
+
     def wait_for_seek(self, target_ms, retries=10):
         def check_seek():
             cur = self.player.get_time()
@@ -926,7 +992,7 @@ class ShadowingApp(QWidget):
         self.loop_current = not self.loop_current
         self.loop_toggle.setText("🔁 Loop ON" if self.loop_current else "🔁 Loop OFF")
         self.loop_toggle.setStyleSheet(
-            "font-size: 12px; padding: 2px; background-color: lightgreen;"
+            "font-size: 12px; padding: 2px; background-color: #3CB371; color: white;"
             if self.loop_current
             else "font-size: 12px; padding: 2px;"
         )

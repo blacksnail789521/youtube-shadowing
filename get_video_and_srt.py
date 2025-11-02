@@ -18,6 +18,7 @@ import yt_dlp
 import traceback
 import whisper
 
+
 # === Handle PyInstaller Frozen Mode ===
 if getattr(sys, "frozen", False):
     exe_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
@@ -35,8 +36,6 @@ if os.path.exists(vlc_plugin_path):
 # 🧠 Whisper asset path (e.g. mel_filters.npz)
 os.environ["WHISPER_ASSETS_DIR"] = os.path.join(exe_dir, "whisper", "assets")
 
-
-# === Settings ===
 VIDEO_FORMAT = "mp4"
 AUDIO_FORMAT = "m4a"
 
@@ -91,8 +90,66 @@ class StreamLogger:
         pass
 
 
+# === Subtitle-splitting logic ===
+def split_subtitles(word_dict, max_words=15):
+    """Split recognized words into subtitle segments.
+
+    Logic:
+      - Always split at strong punctuation (. ? !)
+      - Optionally split at soft punctuation (, ; :) if sentence is long enough
+      - Never split by word count alone (no punctuation → no split)
+    """
+    subtitles = []
+    current_sentence = ""
+    sentence_start = None
+    last_end = None
+
+    for (start, end), word in sorted(word_dict.items()):
+        if sentence_start is None:
+            sentence_start = start
+        current_sentence += " " + word
+        last_end = end
+
+        # === punctuation rules ===
+        strong_punct = r"[.?!]$"
+        soft_punct = r"[,;:]$"
+        words_count = len(current_sentence.split())
+        end_sentence = False
+
+        # Strong punctuation → always end
+        if re.search(strong_punct, word) and words_count >= 3:
+            end_sentence = True
+        # Soft punctuation → end only if sentence already long enough
+        elif re.search(soft_punct, word) and words_count >= max_words:
+            end_sentence = True
+
+        if end_sentence:
+            subtitles.append(
+                {
+                    "start": sentence_start,
+                    "end": last_end,
+                    "text": current_sentence.strip(),
+                }
+            )
+            current_sentence = ""
+            sentence_start = None
+
+    # Add final leftover
+    if current_sentence:
+        subtitles.append(
+            {
+                "start": sentence_start,
+                "end": last_end,
+                "text": current_sentence.strip(),
+            }
+        )
+
+    return subtitles
+
+
+
 # === Main Function ===
-def run_transcription(youtube_url, model_size, output_folder, log_callback=print):
+def run_transcription(youtube_url, model_size, output_folder, log_callback=print, max_words=15):
     def log(msg):
         if log_callback:
             log_callback(msg)
@@ -109,7 +166,7 @@ def run_transcription(youtube_url, model_size, output_folder, log_callback=print
     video_path = os.path.join(folder_path, f"video.{VIDEO_FORMAT}")
     log("📥 Downloading video...")
     ydl_opts = {
-        "format": "bv*+ba/best",  # more flexible
+        "format": "bv*+ba/best",
         "outtmpl": video_path,
         "merge_output_format": "mp4",
         "quiet": True,
@@ -142,7 +199,6 @@ def run_transcription(youtube_url, model_size, output_folder, log_callback=print
     log("✅ Audio extracted.")
 
     # Step 4: Transcribe with Whisper
-    # Ensure sys.stdout/stderr are valid to prevent tqdm crash in Whisper
     if sys.stdout is None:
         sys.stdout = sys.__stdout__
     if sys.stderr is None:
@@ -173,35 +229,8 @@ def run_transcription(youtube_url, model_size, output_folder, log_callback=print
             word_text = word["word"].strip()
             word_dict[(start, end)] = word_text
 
-    subtitles = []
-    current_sentence = ""
-    sentence_start = None
-    last_end = None
-
-    for (start, end), word in sorted(word_dict.items()):
-        if sentence_start is None:
-            sentence_start = start
-        current_sentence += " " + word
-        last_end = end
-        if re.search(r"[.?!]$", word) and len(current_sentence.split()) >= 3:
-            subtitles.append(
-                {
-                    "start": sentence_start,
-                    "end": last_end,
-                    "text": current_sentence.strip(),
-                }
-            )
-            current_sentence = ""
-            sentence_start = None
-
-    if current_sentence:
-        subtitles.append(
-            {
-                "start": sentence_start,
-                "end": last_end,
-                "text": current_sentence.strip(),
-            }
-        )
+    # Use the standalone splitter
+    subtitles = split_subtitles(word_dict, max_words)
 
     def format_timestamp(seconds):
         h = int(seconds // 3600)
@@ -230,20 +259,14 @@ if __name__ == "__main__":
         sys.__stdout__.write(text + "\n")
         sys.__stdout__.flush()
 
-    parser = argparse.ArgumentParser(
-        description="Download + Transcribe a YouTube video."
-    )
+    parser = argparse.ArgumentParser(description="Download + Transcribe a YouTube video.")
     parser.add_argument("url", help="YouTube URL")
     parser.add_argument(
         "--model_size",
         help="Whisper model (tiny, base, small, medium, large, turbo)",
         default="turbo",
     )
-    parser.add_argument(
-        "--output_folder", default="youtube_videos", help="Output folder"
-    )
+    parser.add_argument("--output_folder", default="youtube_videos", help="Output folder")
 
     args = parser.parse_args()
-    run_transcription(
-        args.url, args.model_size, args.output_folder, log_callback=print_line
-    )
+    run_transcription(args.url, args.model_size, args.output_folder, log_callback=print_line)
