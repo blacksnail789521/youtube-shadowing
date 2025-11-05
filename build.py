@@ -2,6 +2,7 @@ import subprocess
 import os
 import shutil
 import sys
+import zipfile
 
 # === Config ===
 HOOKS_DIR = "hooks"
@@ -40,11 +41,10 @@ def build_exe():
 
     app_name = "shadowing"
 
-    # Remove previous dist folder for a clean build
-    dist_app_folder = os.path.join("dist", app_name)
-    if os.path.exists(dist_app_folder):
-        print(f"🧹 Removing existing folder: {dist_app_folder}")
-        shutil.rmtree(dist_app_folder)
+    # Remove the entire dist folder for a completely clean build
+    if os.path.exists("dist"):
+        print("🧹 Removing existing 'dist' folder...")
+        shutil.rmtree("dist")
 
     # Remove previous build folder and spec if exist
     if os.path.exists("build"):
@@ -137,8 +137,30 @@ def build_exe():
     if os.path.exists(f"{app_name}.spec"):
         os.remove(f"{app_name}.spec")
 
+    # --- Create ZIP archive ---
+    zip_name = f"{app_name}.zip"
+    zip_path = os.path.join("dist", zip_name)
+    print(f"📦 Creating ZIP archive: {zip_path}")
+
+    # If an old ZIP exists, remove it first
+    if os.path.exists(zip_path):
+        print(f"🧹 Removing existing ZIP: {zip_path}")
+        os.remove(zip_path)
+
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(app_dist_dir):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, os.path.dirname(app_dist_dir))
+                    zipf.write(full_path, rel_path)
+        print(f"✅ Created ZIP archive: {zip_path}")
+    except Exception as e:
+        print(f"⚠️ Warning: failed to create ZIP archive: {e}")
+
     print(f"✅ Portable build complete. Check the folder: {app_dist_dir}")
-    print("You can distribute the entire 'dist/shadowing/' folder. Defender is less likely to flag onedir builds.")
+    print("You can distribute the entire 'dist/shadowing/' folder or upload 'shadowing.zip' to GitHub releases.")
+
 
 if __name__ == "__main__":
     build_exe()
