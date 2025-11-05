@@ -23,8 +23,9 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QComboBox,
     QCheckBox,
+    QGridLayout,
 )
-from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QTextCursor  
+from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QTextCursor
 import threading
 from get_video_and_srt import run_transcription
 import sounddevice as sd
@@ -217,7 +218,7 @@ class ShadowingApp(QWidget):
             self.repeat_sub_btn,
             self.next_sub_btn,
         ]:
-            btn.setFixedWidth(400)
+            btn.setFixedWidth(330)
 
         self.slider = ClickableSlider(Qt.Horizontal)
         self.slider.setTracking(True)
@@ -257,6 +258,8 @@ class ShadowingApp(QWidget):
 
     def init_ui(self):
         control_layout = QHBoxLayout()
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.setSpacing(4)
         control_layout.addWidget(self.skip_back_btn)
         control_layout.addWidget(self.play_pause_btn)
         control_layout.addWidget(self.skip_forward_btn)
@@ -265,6 +268,8 @@ class ShadowingApp(QWidget):
         control_layout.addWidget(control_hint)
 
         shadow_layout = QHBoxLayout()
+        shadow_layout.setContentsMargins(0, 0, 0, 0)
+        shadow_layout.setSpacing(4)
         shadow_hint = QLabel("A: ◀ Prev    S: 🔁 Repeat    D: ▶ Next")
         shadow_hint.setStyleSheet("color: gray; padding-left: 10px;")
         shadow_layout.addWidget(self.prev_sub_btn)
@@ -273,6 +278,8 @@ class ShadowingApp(QWidget):
         shadow_layout.addWidget(shadow_hint)
 
         slider_layout = QHBoxLayout()
+        slider_layout.setContentsMargins(0, 0, 0, 0)
+        slider_layout.setSpacing(4)
         slider_layout.addWidget(self.slider_label)
         slider_layout.addWidget(self.slider)
 
@@ -283,7 +290,7 @@ class ShadowingApp(QWidget):
         speed_hint.setStyleSheet("color: gray; padding-left: 10px;")
         speed_layout.addWidget(speed_hint)
         speed_layout.addStretch()  # Ensures items align left
-        self.speed_slider.setFixedWidth(1140)
+        self.speed_slider.setFixedWidth(930)
 
         # === Left status panel ===
         status_widget = QWidget()
@@ -335,7 +342,9 @@ class ShadowingApp(QWidget):
 
         self.auto_scroll_checkbox = QCheckBox("Auto scroll")
         self.auto_scroll_checkbox.setChecked(True)  # default ON
-        self.auto_scroll_checkbox.setToolTip("Scroll to the newest message automatically")
+        self.auto_scroll_checkbox.setToolTip(
+            "Scroll to the newest message automatically"
+        )
         status_header_row.addWidget(self.auto_scroll_checkbox)
 
         status_layout.addLayout(status_header_row)
@@ -376,45 +385,49 @@ class ShadowingApp(QWidget):
         video_display_layout.addLayout(slider_layout)
 
         # --- Bottom controls layout ---
-        # Create a horizontal layout for the left compact controls.
+        # Make the left cluster a horizontal row: [toggles grid] | [gain+font column]
         left_controls_layout = QHBoxLayout()
-        left_controls_layout.setSpacing(5)
+        left_controls_layout.setContentsMargins(0, 0, 0, 0)
+        left_controls_layout.setSpacing(4)
+        left_controls_layout.setAlignment(Qt.AlignTop)
 
-        # Auto play toggle composite.
-        auto_play_widget = QWidget()
-        auto_play_layout = QVBoxLayout(auto_play_widget)
-        auto_play_layout.setContentsMargins(0, 0, 0, 0)
-        auto_play_layout.setSpacing(0)
-        auto_play_layout.addWidget(self.auto_play_toggle, alignment=Qt.AlignCenter)
-        auto_play_label = QLabel("P: Toggle Auto Play")
-        auto_play_label.setAlignment(Qt.AlignCenter)
-        auto_play_label.setStyleSheet("font-size: 10px; color: gray;")
-        auto_play_layout.addWidget(auto_play_label)
-        left_controls_layout.addWidget(auto_play_widget)
+        # 3 toggles stacked vertically with hint labels on the right
+        toggles_grid = QGridLayout()
+        toggles_grid.setContentsMargins(0, 0, 0, 0)
+        toggles_grid.setHorizontalSpacing(8)
+        toggles_grid.setVerticalSpacing(4)
 
-        # Loop toggle composite.
-        loop_widget = QWidget()
-        loop_layout = QVBoxLayout(loop_widget)
-        loop_layout.setContentsMargins(0, 0, 0, 0)
-        loop_layout.setSpacing(0)
-        loop_layout.addWidget(self.loop_toggle, alignment=Qt.AlignCenter)
-        loop_label = QLabel("L Toggle Loop")
-        loop_label.setAlignment(Qt.AlignCenter)
-        loop_label.setStyleSheet("font-size: 10px; color: gray;")
-        loop_layout.addWidget(loop_label)
-        left_controls_layout.addWidget(loop_widget)
+        # Auto Play row
+        auto_play_hint = QLabel("P: Toggle Auto Play")
+        auto_play_hint.setStyleSheet("font-size: 10px; color: gray;")
+        auto_play_hint.setWordWrap(True)
+        toggles_grid.addWidget(self.auto_play_toggle, 0, 0, alignment=Qt.AlignLeft)
+        toggles_grid.addWidget(auto_play_hint, 0, 1, alignment=Qt.AlignLeft)
 
-        # Record toggle composite.
-        record_widget = QWidget()
-        record_layout = QVBoxLayout(record_widget)
-        record_layout.setContentsMargins(0, 0, 0, 0)
-        record_layout.setSpacing(0)
-        record_layout.addWidget(self.record_toggle, alignment=Qt.AlignCenter)
-        record_label = QLabel("R: Toggle Record")
-        record_label.setAlignment(Qt.AlignCenter)
-        record_label.setStyleSheet("font-size: 10px; color: gray;")
-        record_layout.addWidget(record_label)
-        left_controls_layout.addWidget(record_widget)
+        # Loop row
+        loop_hint = QLabel("L: Toggle Loop")
+        loop_hint.setStyleSheet("font-size: 10px; color: gray;")
+        loop_hint.setWordWrap(True)
+        toggles_grid.addWidget(self.loop_toggle, 1, 0, alignment=Qt.AlignLeft)
+        toggles_grid.addWidget(loop_hint, 1, 1, alignment=Qt.AlignLeft)
+
+        # Record row
+        record_hint = QLabel("R: Toggle Record")
+        record_hint.setStyleSheet("font-size: 10px; color: gray;")
+        record_hint.setWordWrap(True)
+        toggles_grid.addWidget(self.record_toggle, 2, 0, alignment=Qt.AlignLeft)
+        toggles_grid.addWidget(record_hint, 2, 1, alignment=Qt.AlignLeft)
+
+        left_controls_layout.addLayout(toggles_grid)
+
+        # Add a slim vertical separator between toggles and the right column
+        sep = QFrame()
+        sep.setObjectName("sepRight")
+        sep.setFrameShape(QFrame.NoFrame)  # draw our own line
+        sep.setFixedWidth(3)  # 1-px line
+        sep.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        sep.setStyleSheet("#sepRight { background-color: #222222; }")  # dark gray
+        left_controls_layout.addWidget(sep)
 
         # === Record Gain + Subtitle Font stacked vertically ===
         gain_font_widget = QWidget()
@@ -457,37 +470,51 @@ class ShadowingApp(QWidget):
         font_row.addStretch()
         gain_font_layout.addLayout(font_row)
 
+        # Put the recording indicator beneath the gain/font controls (right column)
+        gain_font_layout.addWidget(self.record_status_label)
+
         # Add the combined widget to the left controls area
         left_controls_layout.addWidget(gain_font_widget)
 
-        # Recording indicator.
-        left_controls_layout.addWidget(self.record_status_label)
+        # Separator on the RIGHT of the gain/font column
+        sep_right = QFrame()
+        sep_right.setObjectName("sepRight")
+        sep_right.setFrameShape(QFrame.NoFrame)  # draw our own line
+        sep_right.setFixedWidth(3)  # 1-px line
+        sep_right.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        sep_right.setStyleSheet("#sepRight { background-color: #222222; }")  # dark gray
+        left_controls_layout.addWidget(sep_right)
 
         # Wrap the left controls in a fixed-size widget.
         left_controls_widget = QWidget()
         left_controls_widget.setLayout(left_controls_layout)
-        left_controls_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        left_controls_widget.setMinimumHeight(0)
+        left_controls_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
 
-        # Main bottom layout: add left controls then add the subtitle display with a stretch factor.
-        subtitle_with_loop_layout = QHBoxLayout()
-        subtitle_with_loop_layout.addWidget(left_controls_widget)
-        subtitle_with_loop_layout.addWidget(self.subtitle_display, 1)
-        # --- End bottom controls layout ---
-
-        video_display_layout.addLayout(subtitle_with_loop_layout)
+        # Part 1: ONLY the running subtitle
+        subtitle_only_layout = QHBoxLayout()
+        subtitle_only_layout.addWidget(self.subtitle_display, 1)
+        video_display_layout.addLayout(subtitle_only_layout)
 
         video_display_widget = QWidget()
         video_display_widget.setLayout(video_display_layout)
         video_display_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        controls_layout = QVBoxLayout()
-        controls_layout.addLayout(control_layout)
-        controls_layout.addLayout(shadow_layout)
-        controls_layout.addLayout(speed_layout)
+        # Part 2: LEFT = toggles/gain/font/indicator; RIGHT = playback controls
+        controls_right_layout = QVBoxLayout()
+        controls_right_layout.addLayout(control_layout)  # ⏪ Play ⏩ row
+        controls_right_layout.addLayout(shadow_layout)  # ◀ Repeat ▶ row
+        controls_right_layout.addLayout(speed_layout)  # Speed slider row
+
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(4)
+        controls_row.addWidget(left_controls_widget)  # moved from the old subtitle row
+        controls_row.addLayout(controls_right_layout, 1)
+
         controls_widget = QWidget()
-        controls_widget.setLayout(controls_layout)
-        controls_widget.setFixedHeight(130)
-        controls_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        controls_widget.setLayout(controls_row)
+        controls_widget.setMinimumHeight(0)
+        controls_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         video_splitter = QSplitter(Qt.Vertical)
         video_splitter.setStyleSheet(
@@ -495,6 +522,16 @@ class ShadowingApp(QWidget):
         )
         video_splitter.addWidget(video_display_widget)
         video_splitter.addWidget(controls_widget)
+
+        # Bottom (controls) visible but as small as possible by default
+        video_splitter.setCollapsible(0, False)  # keep video area from collapsing
+        video_splitter.setCollapsible(1, True)  # controls can collapse if dragged
+        video_splitter.setStretchFactor(0, 1)  # give stretch to video
+        video_splitter.setStretchFactor(1, 0)
+
+        # Start with a tiny controls height (but not zero). e.g., 48 pixels.
+        video_splitter.setSizes([10**6, 48])
+
         video_widget = video_splitter
 
         top_video_splitter = QSplitter(Qt.Vertical)
@@ -1114,10 +1151,13 @@ class ShadowingApp(QWidget):
         palette.setColor(QPalette.HighlightedText, Qt.white)
         app.setPalette(palette)
         self.video_frame.setStyleSheet("background-color: black;")
-    
+
     def _auto_scroll_status_output(self):
         # Only scroll when enabled
-        if hasattr(self, "auto_scroll_checkbox") and self.auto_scroll_checkbox.isChecked():
+        if (
+            hasattr(self, "auto_scroll_checkbox")
+            and self.auto_scroll_checkbox.isChecked()
+        ):
             # Smooth + reliable: use the scrollbar
             sb = self.status_output.verticalScrollBar()
             if sb is not None:
@@ -1128,7 +1168,6 @@ class ShadowingApp(QWidget):
                 cursor.movePosition(QTextCursor.End)
                 self.status_output.setTextCursor(cursor)
                 self.status_output.ensureCursorVisible()
-
 
 
 if __name__ == "__main__":
