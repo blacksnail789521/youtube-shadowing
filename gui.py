@@ -22,8 +22,9 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QMessageBox,
     QComboBox,
+    QCheckBox,
 )
-from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
+from PyQt5.QtGui import QFont, QIcon, QPalette, QColor, QTextCursor  
 import threading
 from get_video_and_srt import run_transcription
 import sounddevice as sd
@@ -95,9 +96,9 @@ class ShadowingApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("English Shadowing Tool with YouTube Videos")
-        
+
         # Detect correct base path for both PyInstaller and dev mode
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             base_path = sys._MEIPASS  # PyInstaller temp folder (onefile)
         else:
             base_path = os.path.dirname(__file__)
@@ -116,7 +117,6 @@ class ShadowingApp(QWidget):
             self.restoreGeometry(geometry)
         else:
             self.setGeometry(200, 200, 1200, 700)
-
 
         self.manual_jump = False
 
@@ -137,11 +137,20 @@ class ShadowingApp(QWidget):
         self.poll_timer.setInterval(300)
         self.poll_timer.timeout.connect(self.sync_with_video)
 
+        # --- Study timer state ---
+        self.study_timer = QTimer(self)
+        self.study_timer.setInterval(1000)  # 1 second tick
+        self.study_timer.timeout.connect(self.update_study_time)
+
+        self.study_elapsed_seconds = 0
+        self.study_timer_running = False
+
         self.status_output = QTextEdit()
         self.status_output.setReadOnly(True)
         self.status_output.append(
             "👋 Welcome to English Shadowing Tool with YouTube Videos!"
         )
+        self.status_output.textChanged.connect(self._auto_scroll_status_output)
 
         self.process = QProcess(self)
         self.process.setProgram(sys.executable)
@@ -153,7 +162,7 @@ class ShadowingApp(QWidget):
         self.video_frame = QFrame()
         self.video_frame.setStyleSheet("background-color: black;")
         self.video_frame.setMinimumHeight(400)
-        
+
         # Theme: apply dark mode
         self.apply_theme()
 
@@ -309,7 +318,9 @@ class ShadowingApp(QWidget):
         self.max_words_selector = QComboBox()
         self.max_words_selector.addItems([str(i) for i in range(10, 31)])  # 10 → 30
         self.max_words_selector.setCurrentText("15")  # Default value
-        self.max_words_selector.setToolTip("Maximum number of words before a subtitle may split")
+        self.max_words_selector.setToolTip(
+            "Maximum number of words before a subtitle may split"
+        )
         max_row = QHBoxLayout()
         max_label = QLabel("🧾 Max Words per Subtitle:")
         max_label.setFixedWidth(140)
@@ -318,7 +329,16 @@ class ShadowingApp(QWidget):
         status_layout.addLayout(max_row)
 
         # --- Status output area ---
-        status_layout.addWidget(QLabel("📄 Status:"))
+        status_header_row = QHBoxLayout()
+        status_header_row.addWidget(QLabel("📄 Status:"))
+        status_header_row.addStretch()
+
+        self.auto_scroll_checkbox = QCheckBox("Auto scroll")
+        self.auto_scroll_checkbox.setChecked(True)  # default ON
+        self.auto_scroll_checkbox.setToolTip("Scroll to the newest message automatically")
+        status_header_row.addWidget(self.auto_scroll_checkbox)
+
+        status_layout.addLayout(status_header_row)
         status_layout.addWidget(self.status_output)
 
         status_widget.setLayout(status_layout)
@@ -430,14 +450,15 @@ class ShadowingApp(QWidget):
         self.subtitle_font_size_selector.addItems(font_sizes)
         self.subtitle_font_size_selector.setCurrentText("16")
         self.subtitle_font_size_selector.setFixedWidth(60)
-        self.subtitle_font_size_selector.currentTextChanged.connect(self.change_subtitle_font_size)
+        self.subtitle_font_size_selector.currentTextChanged.connect(
+            self.change_subtitle_font_size
+        )
         font_row.addWidget(self.subtitle_font_size_selector)
         font_row.addStretch()
         gain_font_layout.addLayout(font_row)
 
         # Add the combined widget to the left controls area
         left_controls_layout.addWidget(gain_font_widget)
-
 
         # Recording indicator.
         left_controls_layout.addWidget(self.record_status_label)
@@ -485,6 +506,35 @@ class ShadowingApp(QWidget):
         top_video_splitter.setSizes([100, 1000])
 
         right_layout = QVBoxLayout()
+        # --- Study Timer row (top-right, above the list) ---
+        timer_row = QHBoxLayout()
+        timer_row.setContentsMargins(0, 0, 0, 0)
+        timer_row.setSpacing(8)
+        timer_row.setAlignment(Qt.AlignLeft)  # ensure left alignment
+
+        # Text label on the left
+        self.study_timer_text = QLabel("⏱ Study time:")
+        self.study_timer_text.setToolTip("Total active study time")
+        timer_row.addWidget(self.study_timer_text)
+
+        # Timer value
+        self.study_timer_label = QLabel("00:00:00")
+        self.study_timer_label.setStyleSheet("font-weight: bold;")
+        timer_row.addWidget(self.study_timer_label)
+
+        # Start/Pause button
+        self.study_timer_btn = QPushButton("▶ Start")
+        self.study_timer_btn.setFixedSize(80, 24)
+        self.study_timer_btn.setToolTip("Start/Pause study timer")
+        self.study_timer_btn.clicked.connect(self.toggle_study_timer)
+        timer_row.addWidget(self.study_timer_btn)
+
+        # Optional: keep content left while filling the rest of the row
+        timer_row.addStretch()
+
+        right_layout.addLayout(timer_row)
+
+        # The list stays where it was
         right_layout.addWidget(QLabel("🧾 Subtitle List:"))
         right_layout.addWidget(self.subtitle_list)
         right_widget = QWidget()
@@ -809,6 +859,27 @@ class ShadowingApp(QWidget):
         secs = seconds % 60
         return f"{mins:02}:{secs:02}"
 
+    def format_hms(self, total_seconds):
+        h = total_seconds // 3600
+        m = (total_seconds % 3600) // 60
+        s = total_seconds % 60
+        return f"{h:02}:{m:02}:{s:02}"
+
+    def toggle_study_timer(self):
+        self.study_timer_running = not self.study_timer_running
+        if self.study_timer_running:
+            self.study_timer.start()
+            self.study_timer_btn.setText("⏸ Pause")
+        else:
+            self.study_timer.stop()
+            self.study_timer_btn.setText("▶ Start")
+
+    def update_study_time(self):
+        self.study_elapsed_seconds += 1
+        self.study_timer_label.setText(
+            f"⏱ {self.format_hms(self.study_elapsed_seconds)}"
+        )
+
     def sync_with_video(self):
         current_ms = self.player.get_time()
         if not self.slider_was_pressed:
@@ -1022,8 +1093,8 @@ class ShadowingApp(QWidget):
         self.settings.setValue("geometry", self.saveGeometry())
 
     # -------------------
-     # THEME: Dark (always on)
-     # -------------------
+    # THEME: Dark (always on)
+    # -------------------
     def apply_theme(self):
         """Apply dark mode palette globally (no toggle)."""
         app = QApplication.instance()
@@ -1043,6 +1114,21 @@ class ShadowingApp(QWidget):
         palette.setColor(QPalette.HighlightedText, Qt.white)
         app.setPalette(palette)
         self.video_frame.setStyleSheet("background-color: black;")
+    
+    def _auto_scroll_status_output(self):
+        # Only scroll when enabled
+        if hasattr(self, "auto_scroll_checkbox") and self.auto_scroll_checkbox.isChecked():
+            # Smooth + reliable: use the scrollbar
+            sb = self.status_output.verticalScrollBar()
+            if sb is not None:
+                sb.setValue(sb.maximum())
+            else:
+                # Fallback: move cursor to the end
+                cursor = self.status_output.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                self.status_output.setTextCursor(cursor)
+                self.status_output.ensureCursorVisible()
+
 
 
 if __name__ == "__main__":
